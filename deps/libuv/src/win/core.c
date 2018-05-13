@@ -83,13 +83,8 @@ static int uv__loops_capacity;
 #define UV__LOOPS_CHUNK_SIZE 8
 static uv_mutex_t uv__loops_lock;
 
-static void uv__loops_init() {
+static void uv__loops_init(void) {
   uv_mutex_init(&uv__loops_lock);
-  uv__loops = uv__calloc(UV__LOOPS_CHUNK_SIZE, sizeof(uv_loop_t*));
-  if (!uv__loops)
-    uv_fatal_error(ERROR_OUTOFMEMORY, "uv__malloc");
-  uv__loops_size = 0;
-  uv__loops_capacity = UV__LOOPS_CHUNK_SIZE;
 }
 
 static int uv__loops_add(uv_loop_t* loop) {
@@ -138,6 +133,13 @@ static void uv__loops_remove(uv_loop_t* loop) {
   uv__loops[uv__loops_size - 1] = NULL;
   --uv__loops_size;
 
+  if (uv__loops_size == 0) {
+    uv__loops_capacity = 0;
+    uv__free(uv__loops);
+    uv__loops = NULL;
+    goto loop_removed;
+  }
+
   /* If we didn't grow to big skip downsizing */
   if (uv__loops_capacity < 4 * UV__LOOPS_CHUNK_SIZE)
     goto loop_removed;
@@ -156,7 +158,7 @@ loop_removed:
   uv_mutex_unlock(&uv__loops_lock);
 }
 
-void uv__wake_all_loops() {
+void uv__wake_all_loops(void) {
   int i;
   uv_loop_t* loop;
 
@@ -237,7 +239,7 @@ int uv_loop_init(uv_loop_t* loop) {
 
   QUEUE_INIT(&loop->wq);
   QUEUE_INIT(&loop->handle_queue);
-  QUEUE_INIT(&loop->active_reqs);
+  loop->active_reqs.count = 0;
   loop->active_handles = 0;
 
   loop->pending_reqs_tail = NULL;
@@ -329,6 +331,11 @@ int uv__loop_configure(uv_loop_t* loop, uv_loop_option option, va_list ap) {
 
 int uv_backend_fd(const uv_loop_t* loop) {
   return -1;
+}
+
+
+int uv_loop_fork(uv_loop_t* loop) {
+  return UV_ENOSYS;
 }
 
 
@@ -463,8 +470,8 @@ static void uv_poll_ex(uv_loop_t* loop, DWORD timeout) {
 
 
 static int uv__loop_alive(const uv_loop_t* loop) {
-  return loop->active_handles > 0 ||
-         !QUEUE_EMPTY(&loop->active_reqs) ||
+  return uv__has_active_handles(loop) ||
+         uv__has_active_reqs(loop) ||
          loop->endgame_handles != NULL;
 }
 
