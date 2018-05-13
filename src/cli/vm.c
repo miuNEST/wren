@@ -5,6 +5,7 @@
 #include "modules.h"
 #include "scheduler.h"
 #include "vm.h"
+#include "wren_loader.h"
 
 // The single VM instance that the CLI uses.
 static WrenVM* vm;
@@ -236,6 +237,8 @@ void runFile(const char* path)
   {
     uv_run(loop, UV_RUN_DEFAULT);
   }
+
+  WrenSaverDump(vm);
 
   freeVM();
 

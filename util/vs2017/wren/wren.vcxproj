@@ -98,7 +98,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\..\..\src\include;..\..\..\src\vm;..\..\..\src\optional;..\..\..\src\module;..\..\..\src\cli;deps\libuv\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\..\src\include;..\..\..\src\vm;..\..\..\src\optional;..\..\..\src\module;..\..\..\src\cli;..\..\..\deps\libuv\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <CompileAs>CompileAsC</CompileAs>
@@ -107,12 +107,12 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>libuv.lib;userenv.lib;advapi32.lib;iphlpapi.lib;psapi.lib;shell32.lib;ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>deps\libuv\Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\..\..\deps\libuv\Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
     </Link>
     <PreBuildEvent>
-      <Command>python ../../libuv.py download
-python ../../libuv.py build -32</Command>
+      <Command>
+      </Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -203,6 +203,7 @@ python ../../libuv.py build -64</Command>
     <ClInclude Include="..\..\..\src\vm\wren_compiler.h" />
     <ClInclude Include="..\..\..\src\vm\wren_core.h" />
     <ClInclude Include="..\..\..\src\vm\wren_debug.h" />
+    <ClInclude Include="..\..\..\src\vm\wren_loader.h" />
     <ClInclude Include="..\..\..\src\vm\wren_opcodes.h" />
     <ClInclude Include="..\..\..\src\vm\wren_primitive.h" />
     <ClInclude Include="..\..\..\src\vm\wren_utils.h" />
@@ -223,6 +224,7 @@ python ../../libuv.py build -64</Command>
     <ClCompile Include="..\..\..\src\vm\wren_compiler.c" />
     <ClCompile Include="..\..\..\src\vm\wren_core.c" />
     <ClCompile Include="..\..\..\src\vm\wren_debug.c" />
+    <ClCompile Include="..\..\..\src\vm\wren_loader.c" />
     <ClCompile Include="..\..\..\src\vm\wren_primitive.c" />
     <ClCompile Include="..\..\..\src\vm\wren_utils.c" />
     <ClCompile Include="..\..\..\src\vm\wren_value.c" />

@@ -58,7 +58,7 @@ static void dumpObject(Obj* obj)
     case OBJ_MAP: printf("[map %p]", obj); break;
     case OBJ_MODULE: printf("[module %p]", obj); break;
     case OBJ_RANGE: printf("[range %p]", obj); break;
-    case OBJ_STRING: printf("%s", ((ObjString*)obj)->value); break;
+    case OBJ_STRING: printf("[str %s]", ((ObjString*)obj)->value); break;
     case OBJ_UPVALUE: printf("[upvalue %p]", obj); break;
     default: printf("[unknown object %d]", obj->type); break;
   }
@@ -69,7 +69,7 @@ void wrenDumpValue(Value value)
 #if WREN_NAN_TAGGING
   if (IS_NUM(value))
   {
-    printf("%.14g", AS_NUM(value));
+    printf("[num %.14g]", AS_NUM(value));
   }
   else if (IS_OBJ(value))
   {
@@ -79,10 +79,10 @@ void wrenDumpValue(Value value)
   {
     switch (GET_TAG(value))
     {
-      case TAG_FALSE:     printf("false"); break;
-      case TAG_NAN:       printf("NaN"); break;
-      case TAG_NULL:      printf("null"); break;
-      case TAG_TRUE:      printf("true"); break;
+      case TAG_FALSE:     printf("[val false]"); break;
+      case TAG_NAN:       printf("[val NaN]"); break;
+      case TAG_NULL:      printf("[val null]"); break;
+      case TAG_TRUE:      printf("[val true]"); break;
       case TAG_UNDEFINED: UNREACHABLE();
     }
   }
@@ -361,6 +361,15 @@ void wrenDumpCode(WrenVM* vm, ObjFn* fn)
   printf("%s: %s\n",
          fn->module->name == NULL ? "<core>" : fn->module->name->value,
          fn->debug->name);
+
+  printf("Fn: %p\n", fn);
+  for (int k = 0; k < fn->constants.count; k++)
+  {
+    printf("const %d: ", k);
+    wrenDumpValue(fn->constants.data[k]);
+    printf("\n");
+  }
+  printf("\n");
 
   int i = 0;
   int lastLine = -1;
