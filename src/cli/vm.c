@@ -16,7 +16,7 @@ static WrenForeignMethodFn afterLoadFn = NULL;
 
 static uv_loop_t* loop;
 
-static char const* rootDirectory = NULL;
+char const* rootDirectory = NULL;
 
 // The exit code to use unless some other error overrides it.
 int defaultExitCode = 0;
@@ -238,7 +238,7 @@ void runFile(const char* path)
     uv_run(loop, UV_RUN_DEFAULT);
   }
 
-  WrenSaverDump(vm);
+  WrenSaveBytecode(vm);
 
   freeVM();
 
