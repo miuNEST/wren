@@ -471,7 +471,7 @@ static inline void callFunction(
 // Looks up the previously loaded module with [name].
 //
 // Returns `NULL` if no module with that name has been loaded.
-static ObjModule* getModule(WrenVM* vm, Value name)
+ObjModule* getModule(WrenVM* vm, Value name)
 {
   Value moduleValue = wrenMapGet(vm->modules, name);
   return !IS_UNDEFINED(moduleValue) ? AS_MODULE(moduleValue) : NULL;

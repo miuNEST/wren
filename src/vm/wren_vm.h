@@ -209,4 +209,6 @@ static inline ObjClass* wrenGetClassInline(WrenVM* vm, Value value)
   return NULL;
 }
 
+ObjModule* getModule(WrenVM* vm, Value name);
+
 #endif
