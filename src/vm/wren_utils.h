@@ -61,6 +61,23 @@ typedef struct sObjString ObjString;
     void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data) \
     { \
       wren##name##BufferFill(vm, buffer, data, 1); \
+    } \
+    \
+    void wren##name##BufferAppend(WrenVM* vm, name##Buffer* buffer, type *data, \
+                                uint8_t count) \
+    { \
+      if (buffer->capacity < buffer->count + count) \
+      { \
+        int capacity = wrenPowerOf2Ceil(buffer->count + count); \
+        buffer->data = (type*)wrenReallocate(vm, buffer->data, \
+            buffer->capacity * sizeof(type), capacity * sizeof(type)); \
+        buffer->capacity = capacity; \
+      } \
+      \
+      for (uint8_t i = 0; i < count; i++) \
+      { \
+        buffer->data[buffer->count++] = *data++; \
+      } \
     }
 
 DECLARE_BUFFER(Byte, uint8_t);

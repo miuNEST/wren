@@ -2,8 +2,9 @@
 
 #include <stdio.h>
 #include "wren_value.h"
+#include "wren_utils.h"
 
-#define FILE_MAGIC           'NERW'
+#define WREN_FILE_MAGIC       'NERW'
 #define WREN_BYTECODDE_MAJOR  1
 #define WREN_BYTECODDE_MINOR  0
 
@@ -105,7 +106,7 @@ typedef struct Buffer
 extern char const* rootDirectory;
 
 Buffer methodNameBuffer;
-Buffer variableNameBuffer;
+Buffer variableBuffer;
 Buffer fnBuffer;
 Buffer fnIndexBuffer;
 
@@ -167,10 +168,13 @@ bool BufferAppend(Buffer *buffer, const char *data, uint32_t dataLength)
   return true;
 }
 
-bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char *data)
+bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char **data)
 {
   if (!lenDesired)
+  {
+    *data = buffer->pointer + buffer->consumed;
     return true;
+  }
 
   if (buffer->length - buffer->consumed < lenDesired)
   {
@@ -178,9 +182,20 @@ bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char *data)
     return false;
   }
 
-  memcpy(data, buffer->pointer + buffer->consumed, lenDesired);
+  *data = buffer->pointer + buffer->consumed;
   buffer->consumed += lenDesired;
   return true;
+}
+
+bool BufferSeek(Buffer *buffer, uint32_t offset)
+{
+  if (offset < buffer->length)
+  {
+    buffer->consumed = offset;
+    return true;
+  }
+
+  return false;
 }
 
 bool IsBufferExhausted(const Buffer *buffer)
@@ -307,6 +322,7 @@ uint32_t GetFnIndex(WrenVM *vm, ObjModule *module, ObjFn *fnTarget)
   return (uint32_t)-1;
 }
 
+//TODO: 此处增加对新的类型的处理。
 bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
   Value value, Buffer *buffer)
 {
@@ -500,11 +516,11 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
   entryFn = 0;
 
   BufferInit(&methodNameBuffer);
-  BufferInit(&variableNameBuffer);
+  BufferInit(&variableBuffer);
   BufferInit(&fnBuffer);
   BufferInit(&fnIndexBuffer);
 
-  if (SaveMoudleVariableToBuffer(vm, module, &variableNameBuffer)
+  if (SaveMoudleVariableToBuffer(vm, module, &variableBuffer)
     && SaveModuleFnToBuffer(vm, module, &fnIndexBuffer, &fnBuffer)
     && entryFn != 0
     && SaveModuleMethodToBuffer(vm, module, &methodNameBuffer))
@@ -514,7 +530,7 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
     ModuleFileHeader header;
     memset(&header, 0, sizeof(header));
 
-    header.magic        = FILE_MAGIC;
+    header.magic        = WREN_FILE_MAGIC;
     header.majorVersion = WREN_BYTECODDE_MAJOR;
     header.minorVersion = WREN_BYTECODDE_MINOR;
     header.entryFn      = entryFn;
@@ -523,7 +539,7 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
     uint32_t offset = sizeof(header);
 
     header.dataDir[MODULE_DATA_DIR_VARIABLE].offset = offset;
-    header.dataDir[MODULE_DATA_DIR_VARIABLE].size   = variableNameBuffer.length;
+    header.dataDir[MODULE_DATA_DIR_VARIABLE].size   = variableBuffer.length;
     offset += header.dataDir[MODULE_DATA_DIR_VARIABLE].size;
 
     header.dataDir[MODULE_DATA_DIR_FN_INDEX].offset = offset;
@@ -554,7 +570,7 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
     if ((fileName = GetModuleFileName(module)) != NULL
       && (f = fopen(fileName, "wb")) != NULL
       && fwrite(&header, 1, sizeof(header), f) == sizeof(header)
-      && fwrite(variableNameBuffer.pointer, 1, variableNameBuffer.length, f) == variableNameBuffer.length
+      && fwrite(variableBuffer.pointer, 1, variableBuffer.length, f) == variableBuffer.length
       && fwrite(fnIndexBuffer.pointer, 1, fnIndexBuffer.length, f) == fnIndexBuffer.length
       && fwrite(fnBuffer.pointer, 1, fnBuffer.length, f) == fnBuffer.length
       && fwrite(methodNameBuffer.pointer, 1, methodNameBuffer.length, f) == methodNameBuffer.length)
@@ -568,7 +584,7 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
   }
 
   BufferFree(&methodNameBuffer);
-  BufferFree(&variableNameBuffer);
+  BufferFree(&variableBuffer);
   BufferFree(&fnBuffer);
   BufferFree(&fnIndexBuffer);
 
@@ -609,7 +625,7 @@ void WrenLoaderInit(void)
 
 bool IsValid(const ModuleFileHeader *header, long int fileSize)
 {
-  if (header->magic != FILE_MAGIC)
+  if (header->magic != WREN_FILE_MAGIC)
     return false;
 
   if (!(header->majorVersion > WREN_BYTECODDE_MAJOR
@@ -629,6 +645,7 @@ bool IsValid(const ModuleFileHeader *header, long int fileSize)
   return true;
 }
 
+//TODO: 此处增加对新的类型的处理。
 bool ParseValue(WrenVM *vm, ObjModule *module, uint8_t type,
   const char *data, uint32_t length, Value *value)
 {
@@ -664,6 +681,12 @@ bool ParseValue(WrenVM *vm, ObjModule *module, uint8_t type,
   return ret;
 }
 
+
+/*
+  TODO: 
+  1、由于每个模块都优先引入了core模块的全部变量，所以要对core模块的变量的下标进行重定位，
+  防止core模块的变量有增删改时，下标所指向的变量不是所预期的那个。
+*/
 bool LoadVariables(Buffer *buffer, WrenVM *vm, ObjModule *module)
 {
   if (!buffer->pointer)
@@ -676,30 +699,26 @@ bool LoadVariables(Buffer *buffer, WrenVM *vm, ObjModule *module)
     if (IsBufferExhausted(buffer))
       break;
 
-    uint32_t nameLength;
-    char    *varName = NULL;
+    uint32_t *nameLength;
+    char     *varName;
     
-    uint8_t  type;
-    uint32_t valueLength;
-    char    *varValue = NULL;
+    uint8_t  *type;
+    uint32_t *valueLength;
+    char     *varValue;
 
     Value value;
     int   symbol;
 
-    if (BufferConsume(buffer, sizeof(nameLength), (char *)&nameLength)
-      && (varName = malloc(nameLength)) != NULL
-      && BufferConsume(buffer, nameLength, varName)
-      && BufferConsume(buffer, sizeof(type), (char *)&type)
-      && BufferConsume(buffer, sizeof(valueLength), (char *)&valueLength)
-      && (varValue = malloc(valueLength)) != NULL
-      && ParseValue(vm, module, type, varValue, valueLength, &value)
+    if (BufferConsume(buffer, sizeof(uint32_t), (char **)&nameLength)
+      && BufferConsume(buffer, *nameLength, &varName)
+      && BufferConsume(buffer, sizeof(uint8_t), (char **)&type)
+      && BufferConsume(buffer, sizeof(uint32_t), (char **)&valueLength)
+      && BufferConsume(buffer, *valueLength, &varValue)
+      && ParseValue(vm, module, *type, varValue, *valueLength, &value)
       )
     {
-      symbol = wrenDefineVariable(vm, module, varName, nameLength, value);
+      symbol = wrenDefineVariable(vm, module, varName, *nameLength, value);
     }
-
-    if (varName)  free(varName);
-    if (varValue) free(varValue);
 
     if (symbol == -2)
     {
@@ -712,13 +731,105 @@ bool LoadVariables(Buffer *buffer, WrenVM *vm, ObjModule *module)
   return ret;
 }
 
+/*
+  TODO: 对引用到vm->methodNames表的下标的指令进行重定位。
+  
+  由于method表是整个vm中的所有module共享的，这个表的增删改都影响到下标相关的指令。
+
+  通过vm->methodNames的x-ref，发现共计有如下指令引用了vm->methodNames表的下标：
+    CODE_CALL_0系列
+    CODE_SUPER_0系列
+    CODE_METHOD_INSTANCE
+    CODE_METHOD_STATIC
+*/
 bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
 {
-  return true;
+  if (!buffer->pointer)
+    return false;
+
+  bool ret = true;
+
+  do
+  {
+    if (IsBufferExhausted(buffer))
+      break;
+
+    uint32_t *nameLength;
+    char     *methodName;
+    int       symbol;
+
+    if (BufferConsume(buffer, sizeof(uint32_t), (char **)&nameLength)
+      && BufferConsume(buffer, *nameLength, &methodName)
+      )
+    {      
+      symbol = wrenSymbolTableEnsure(vm, &vm->methodNames, methodName, *nameLength);
+    }
+    else
+    {
+      ret = false;
+    }
+
+    if (methodName)  free(methodName);
+  } while (ret);
+
+  return ret;
 }
 
 bool LoadFNs(Buffer *indexBuffer, Buffer *buffer, WrenVM *vm, ObjModule *module)
 {
+  if (!indexBuffer->pointer || !buffer->pointer)
+    return false;
+
+  bool ret = true;
+
+  do
+  {
+    if (IsBufferExhausted(indexBuffer))
+      break;
+
+    DataDirectory *dataDir;
+    FnHeader      *header;
+    uint8_t       *code;
+    char          *constants;
+    char          *debug;
+
+    if (BufferConsume(indexBuffer, sizeof(DataDirectory), (char **)&dataDir)
+
+      && BufferSeek(buffer, dataDir->offset)
+      && BufferConsume(buffer, sizeof(FnHeader), (char **)&header)
+
+      && header->dataDir[FN_DATA_DIR_CODE].size != 0
+      && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_CODE].offset)
+      && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_CODE].size, (char **)&code)
+
+      && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_CONSTANTS].offset)
+      && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_CONSTANTS].size, (char **)&constants)
+
+      && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_DEBUG].offset)
+      && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_DEBUG].size, (char **)&debug)
+      )
+    {
+      ObjFn *fn = wrenNewFunction(vm, module, header->maxSlots);
+      wrenPushRoot(vm, (Obj *)fn);
+      fn->arity       = header->arity;
+      fn->numUpvalues = header->numUpvalues;
+      //TODO: add function name.
+
+      wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
+      if (header->dataDir[FN_DATA_DIR_DEBUG].size)
+        wrenIntBufferAppend(vm, &fn->debug->sourceLines, debug,
+                            header->dataDir[FN_DATA_DIR_DEBUG].size / sizeof(int));
+
+      wrenPopRoot(vm);
+    }
+    else
+    {
+      ret = false;
+      break;
+    }
+  } while (ret);
+
+
   return true;
 }
 
@@ -748,7 +859,7 @@ bool WrenLoadModule(WrenVM *vm, const char *moduleName)
 
   bool ret = false;
 
-  BufferInit(&variableNameBuffer);
+  BufferInit(&variableBuffer);
   BufferInit(&fnIndexBuffer);
   BufferInit(&fnBuffer);
   BufferInit(&methodNameBuffer);
@@ -767,9 +878,9 @@ bool WrenLoadModule(WrenVM *vm, const char *moduleName)
     && fread(&header, 1, sizeof(header), f) == sizeof(header)
     && IsValid(&header, fileSize)
 
-    && BufferInitSize(&variableNameBuffer, header.dataDir[MODULE_DATA_DIR_VARIABLE].size)
+    && BufferInitSize(&variableBuffer, header.dataDir[MODULE_DATA_DIR_VARIABLE].size)
     && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_VARIABLE].offset) == 0
-    && fread(variableNameBuffer.pointer, 1, variableNameBuffer.capacity, f) == variableNameBuffer.capacity
+    && fread(variableBuffer.pointer, 1, variableBuffer.capacity, f) == variableBuffer.capacity
 
     && BufferInitSize(&fnIndexBuffer, header.dataDir[MODULE_DATA_DIR_FN_INDEX].size)
     && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_FN_INDEX].offset) == 0
@@ -784,12 +895,12 @@ bool WrenLoadModule(WrenVM *vm, const char *moduleName)
     && fread(methodNameBuffer.pointer, 1, methodNameBuffer.capacity, f) == methodNameBuffer.capacity
     )
   {
-    variableNameBuffer.length = variableNameBuffer.capacity;
+    variableBuffer.length     = variableBuffer.capacity;
     fnIndexBuffer.length      = fnIndexBuffer.capacity;
     fnBuffer.length           = fnBuffer.capacity;
     methodNameBuffer.length   = methodNameBuffer.capacity;
 
-    ret = LoadVariables(&variableNameBuffer, vm, module)
+    ret = LoadVariables(&variableBuffer, vm, module)
       && LoadFNs(&fnIndexBuffer, &fnBuffer, vm ,module)
       && LoadMethods(&methodNameBuffer, vm ,module);
   }
@@ -797,7 +908,7 @@ bool WrenLoadModule(WrenVM *vm, const char *moduleName)
   if (f) fclose(f);
   if (fileName) free(fileName);
 
-  BufferFree(&variableNameBuffer);
+  BufferFree(&variableBuffer);
   BufferFree(&fnIndexBuffer);
   BufferFree(&fnBuffer);
   BufferFree(&methodNameBuffer);
