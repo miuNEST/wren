@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 #include "wren_value.h"
-#include "wren_utils.h"
 
 #define WREN_FILE_MAGIC       'NERW'
 #define WREN_BYTECODDE_MAJOR  1
@@ -196,6 +195,14 @@ bool BufferSeek(Buffer *buffer, uint32_t offset)
   }
 
   return false;
+}
+
+void BufferSet(Buffer *buffer, char *data, uint32_t length)
+{
+  buffer->pointer  = data;
+  buffer->length   = length;
+  buffer->capacity = length;
+  buffer->consumed = 0;
 }
 
 bool IsBufferExhausted(const Buffer *buffer)
@@ -775,7 +782,46 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
   return ret;
 }
 
-bool LoadFNs(Buffer *indexBuffer, Buffer *buffer, WrenVM *vm, ObjModule *module)
+bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
+{
+  if (!buffer->pointer)
+    return true;
+
+  bool ret = true;
+
+  do
+  {
+    if (IsBufferExhausted(buffer))
+      break;
+
+    uint8_t  *type;
+    uint32_t *length;
+    char     *data;
+    Value     value;
+
+    if (BufferConsume(buffer, sizeof(uint8_t), (char **)&type)
+      && BufferConsume(buffer, sizeof(uint32_t), (char **)&length)
+      && BufferConsume(buffer, *length, (char **)&data)
+      && ParseValue(vm, module, *type, data, *length, &value)
+      )
+    {
+      if (IS_OBJ(value)) wrenPushRoot(vm, AS_OBJ(value));
+
+      wrenValueBufferWrite(vm, &fn->constants, value);
+      
+      if (IS_OBJ(value)) wrenPopRoot(vm);
+    }
+    else
+    {
+      ret = false;
+    }
+  } while (ret);
+
+  return ret;  
+}
+
+bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
+  WrenVM *vm, ObjModule *module)
 {
   if (!indexBuffer->pointer || !buffer->pointer)
     return false;
@@ -815,22 +861,26 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer, WrenVM *vm, ObjModule *module)
       fn->numUpvalues = header->numUpvalues;
       //TODO: add function name.
 
+      Buffer constantBuffer;
+      BufferSet(&constantBuffer, constants, header->dataDir[FN_DATA_DIR_CONSTANTS].size);
+      ret = LoadConstants(&constantBuffer, vm, module, fn);
+
       wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
       if (header->dataDir[FN_DATA_DIR_DEBUG].size)
-        wrenIntBufferAppend(vm, &fn->debug->sourceLines, debug,
-                            header->dataDir[FN_DATA_DIR_DEBUG].size / sizeof(int));
+      {
+        wrenIntBufferAppend(vm, &fn->debug->sourceLines, (int *)debug,
+          header->dataDir[FN_DATA_DIR_DEBUG].size / sizeof(int));
+      }
 
       wrenPopRoot(vm);
     }
     else
     {
       ret = false;
-      break;
     }
   } while (ret);
 
-
-  return true;
+  return ret;
 }
 
 bool WrenLoadModule(WrenVM *vm, const char *moduleName)
@@ -922,6 +972,8 @@ bool WrenLoadModule(WrenVM *vm, const char *moduleName)
 
   wrenPopRoot(vm);
   wrenPopRoot(vm);
+
+  //TODO: 创建fiber、closure，执行本module的主fn。
 
   return ret;
 }

@@ -24,7 +24,9 @@ typedef struct sObjString ObjString;
     void wren##name##BufferClear(WrenVM* vm, name##Buffer* buffer); \
     void wren##name##BufferFill(WrenVM* vm, name##Buffer* buffer, type data, \
                                 int count); \
-    void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data)
+    void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data); \
+    void wren##name##BufferAppend(WrenVM* vm, name##Buffer* buffer, type *data, \
+                                uint8_t count)
 
 // This should be used once for each type instantiation, somewhere in a .c file.
 #define DEFINE_BUFFER(name, type) \
