@@ -16,8 +16,6 @@ static WrenForeignMethodFn afterLoadFn = NULL;
 
 static uv_loop_t* loop;
 
-char const* rootDirectory = NULL;
-
 // The exit code to use unless some other error overrides it.
 int defaultExitCode = 0;
 
@@ -173,10 +171,17 @@ static void reportError(WrenVM* vm, WrenErrorType type,
   }
 }
 
-static void initVM()
+static void initVM(VM_MODE vmMode)
 {
   WrenConfiguration config;
   wrenInitConfiguration(&config);
+
+  //user-defined vm config data
+  UserData *userData = malloc(sizeof(UserData));
+  memset(userData, 0, sizeof(*userData));
+  userData->size   = sizeof(UserData);
+  userData->vmMode = vmMode;
+  config.userData = userData;
 
   config.bindForeignMethodFn = bindForeignMethod;
   config.bindForeignClassFn = bindForeignClass;
@@ -201,12 +206,15 @@ static void freeVM()
   uv_loop_close(loop);
   free(loop);
   
+  if (vm->config.userData)
+    free(vm->config.userData);
+
   wrenFreeVM(vm);
 
   uv_tty_reset_mode();
 }
 
-void runFile(const char* path)
+void runFile(const char* path, VM_MODE vmMode)
 {
   // Use the directory where the file is as the root to resolve imports
   // relative to.
@@ -227,7 +235,7 @@ void runFile(const char* path)
     exit(66);
   }
 
-  initVM();
+  initVM(vmMode);
 
   WrenInterpretResult result = wrenInterpret(vm, source);
 
@@ -237,8 +245,6 @@ void runFile(const char* path)
   {
     uv_run(loop, UV_RUN_DEFAULT);
   }
-
-  WrenSaveBytecode(vm);
 
   freeVM();
 
@@ -254,7 +260,7 @@ void runFile(const char* path)
 
 int runRepl()
 {
-  initVM();
+  initVM(VM_MODE_INTERPRET);
 
   printf("\\\\/\"-\n");
   printf(" \\_/   wren v%s\n", WREN_VERSION_STRING);

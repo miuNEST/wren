@@ -380,6 +380,8 @@ typedef struct
   Scope scope;
 } Variable;
 
+const char *rootDirectory = NULL;
+
 // The stack effect of each opcode. The index in the array is the opcode, and
 // the value is the stack effect of that instruction.
 static const int stackEffects[] = {
@@ -3332,6 +3334,15 @@ static void import(Compiler* compiler)
 {
   ignoreNewlines(compiler);
   consume(compiler, TOKEN_STRING, "Expect a string after 'import'.");
+
+  UserData *userData = compiler->parser->vm->config.userData;
+  if (userData->vmMode == VM_MODE_COMPILE)
+  {
+    Value valClosure = wrenImportModule(compiler->parser->vm, compiler->parser->previous.value);
+    //TODO: 此处检查valClosure是否为空，并做错误处理动作。
+    //TODO: 此处是否要执行valClosure
+  }
+
   int moduleConstant = addConstant(compiler, compiler->parser->previous.value);
 
   // Load the module.

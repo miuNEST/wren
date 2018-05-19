@@ -6,7 +6,7 @@
 #include "wren.h"
 
 void WrenSaverInit(void);
-bool WrenSaveBytecode(WrenVM *vm);
+bool SaveCompiledModule(WrenVM *vm, ObjModule *module);
 
 void WrenLoaderInit(void);
 

@@ -211,4 +211,7 @@ static inline ObjClass* wrenGetClassInline(WrenVM* vm, Value value)
 
 ObjModule* getModule(WrenVM* vm, Value name);
 
+Value wrenImportModule(WrenVM* vm, Value name);
+WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber);
+
 #endif

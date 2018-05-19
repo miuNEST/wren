@@ -213,6 +213,24 @@ typedef struct
 
 } WrenConfiguration;
 
+typedef enum VM_MODE
+{
+  VM_MODE_INTERPRET,
+  VM_MODE_COMPILE,    //compile source(*.wren file) to byte code (*.wrc file)
+  VM_MODE_BYTECODE,   //run *.wrc bytecode file.
+} VM_MODE;
+
+typedef struct UserData
+{
+  int     size;
+
+  VM_MODE vmMode;
+
+  //count of methodNames before we compile a module. It's a saved stack.
+  int  savedMethodCount[16];
+  int  methodCountLevel;
+} UserData;
+
 typedef enum
 {
   WREN_RESULT_SUCCESS,
@@ -448,5 +466,7 @@ void* wrenGetUserData(WrenVM* vm);
 
 // Sets user data associated with the WrenVM.
 void wrenSetUserData(WrenVM* vm, void* userData);
+
+extern const char *rootDirectory;
 
 #endif

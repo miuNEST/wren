@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include "wren_value.h"
+#include "wren_debug.h"
 
 #define WREN_FILE_MAGIC       'NERW'
 #define WREN_BYTECODDE_MAJOR  1
@@ -9,6 +10,12 @@
 
 #ifndef _countof
 #define _countof(x)    (sizeof(x) / sizeof((x)[0]))
+#endif
+
+#if defined(_DEBUG) || defined(DEBUG)
+#define dbgprint printf
+#else
+#define dbgprint
 #endif
 
 #pragma pack(push, 1)
@@ -87,9 +94,21 @@ typedef struct FnHeader
 
 enum FN_CONST_TYPE
 {
-  FN_CONST_TYPE_NUM  = 0,
-  FN_CONST_TYPE_STR  = 1,
-  FN_CONST_TYPE_FN   = 2,
+  FN_CONST_TYPE_NUM,
+  FN_CONST_TYPE_CLASS,
+  FN_CONST_TYPE_CLOSURE,
+  FN_CONST_TYPE_FIBER,
+  FN_CONST_TYPE_FN,
+  FN_CONST_TYPE_FOREIGN,
+  FN_CONST_TYPE_INSTANCE,
+  FN_CONST_TYPE_LIST,
+  FN_CONST_TYPE_MAP,
+  FN_CONST_TYPE_MODULE,
+  FN_CONST_TYPE_RANGE,
+  FN_CONST_TYPE_STRING,
+  FN_CONST_TYPE_UPVALUE
+
+  //only append allowed, because the above value will be saved to byte code.
 };
 
 #pragma pack(pop)
@@ -102,7 +121,7 @@ typedef struct Buffer
   uint32_t consumed;
 } Buffer;
 
-extern char const* rootDirectory;
+extern const char *rootDirectory;
 
 Buffer methodNameBuffer;
 Buffer variableBuffer;
@@ -271,13 +290,20 @@ static bool DumpModules(WrenVM *vm)
   return true;
 }
 
-//TODO: only save method names of a single module.
+//only save method names of a single module.
 static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buffer)
 {
-  for (int k = 0; k < vm->methodNames.count; k++)
-  {
+  dbgprint("module %s\n", module->name ? module->name->value : "core");
+
+  UserData *userData = vm->config.userData;
+  for (int k = userData->savedMethodCount[userData->methodCountLevel - 1];
+    k < vm->methodNames.count; k++)
+  {   
     const char *data       = vm->methodNames.data[k]->value;
     uint32_t    dataLength = vm->methodNames.data[k]->length;
+    
+    dbgprint("    method %d: %s\n", k, data);
+
     if (!BufferAppend(buffer, (const char *)&dataLength, sizeof(uint32_t))
       || !BufferAppend(buffer, data, dataLength))
     {
@@ -291,13 +317,40 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
 // save all variable names of a single module.
 static bool SaveMoudleVariableToBuffer(WrenVM *vm, ObjModule *module, Buffer *buffer)
 {
-  for (int k = 0; k < module->variableNames.count; k++)
+  int numToIgnore;
+
+  bool isCoreModule = module->name == NULL;
+  if (isCoreModule)
   {
+    //the following 3 classes are defined with code, no need to save.
+    //ObjClass *objectClass;
+    //ObjClass *classClass;
+    //ObjClass* objectMetaclass;
+    numToIgnore = 3;
+  }
+  else
+  {
+    ObjModule *coreModule = getModule(vm, NULL_VAL);
+
+    ASSERT(module->variableNames.count >= coreModule->variableNames.count,
+      "all variables of core module must be implicitly imported");
+
+    numToIgnore = coreModule->variableNames.count;
+  }
+
+  dbgprint("%s\n", module->name ? module->name->value : "core");
+    
+  for (int k = numToIgnore; k < module->variableNames.count; k++)
+  {
+    Value value = module->variables.data[k];
+
+    dbgprint("    var %d: %s, ", k, module->variableNames.data[k]->value);
+
     const char *data       = module->variableNames.data[k]->value;
     uint32_t    dataLength = module->variableNames.data[k]->length;
     if (!BufferAppend(buffer, (const char *)&dataLength, sizeof(uint32_t))
       || !BufferAppend(buffer, data, dataLength)
-      || !SaveValueToBuffer(vm, module, module->variables.data[k], buffer))
+      || !SaveValueToBuffer(vm, module, value, buffer))
     {
       return false;
     }
@@ -334,6 +387,10 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
   Value value, Buffer *buffer)
 {
 #if WREN_NAN_TAGGING
+  
+  wrenDumpValue(value);
+  dbgprint("\n");
+
   if (IS_NUM(value))
   {
     TLV_NUM tlvNum;
@@ -352,7 +409,7 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
         {
           TLV_STR tlvStr;
           ObjString *objStr = (ObjString *)obj;
-          tlvStr.type = FN_CONST_TYPE_STR;
+          tlvStr.type = FN_CONST_TYPE_STRING;
           tlvStr.length = objStr->length;
           if (!BufferAppend(buffer, (const char *)&tlvStr, sizeof(tlvStr))
             || !BufferAppend(buffer, objStr->value, objStr->length))
@@ -373,6 +430,64 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
             return false;
         }
         break;
+      case OBJ_CLOSURE:
+        {
+          ObjClosure *objClosure = (ObjClosure *)obj;
+          break;
+        }
+        break;
+      case OBJ_CLASS:
+        {
+          ObjClass *objClass = (ObjClass *)obj;
+          break;
+        }
+        break;
+      case OBJ_INSTANCE:
+        {
+          ObjInstance *objInstance = (ObjInstance *)obj;
+          break;
+        }
+        break;
+      case OBJ_FOREIGN:
+        {
+          ObjForeign *objForeign = (ObjForeign *)obj;
+          break;
+        }
+        break;
+      case OBJ_LIST:
+        {
+          ObjList *objList = (ObjList *)obj;
+          break;
+        }
+        break;
+      case OBJ_MAP:
+        {
+          ObjMap *objMap = (ObjMap *)obj;
+          break;
+        }
+        break;
+      case OBJ_RANGE:
+        {
+          ObjRange *objRange = (ObjRange *)obj;
+          break;
+        }
+        break;
+      case OBJ_FIBER:
+        {
+          ASSERT(false, "unexpected value type");
+        }
+        break;
+      case OBJ_MODULE:
+        {
+          ASSERT(false, "unexpected value type");
+        }
+        break;
+      case OBJ_UPVALUE:
+        {
+          ASSERT(false, "unexpected value type");
+        }
+        break;
+
       default:
         ASSERT(false, "add code here to process more types!");
         return false;
@@ -380,8 +495,20 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
   }
   else
   {
-    ASSERT(false, "add code here to process more types!");
-    return false;
+    switch (value)
+    {
+    case NULL_VAL:
+      break;
+    case FALSE_VAL:
+      break;
+    case TRUE_VAL:
+      break;
+    case UNDEFINED_VAL:
+      break;
+    default:
+      ASSERT(false, "add code here to process more types!");
+      return false;
+    }
   }
 
   return true;
@@ -395,8 +522,13 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
 static bool SaveFnConstantsToBuffer(WrenVM *vm, ObjModule *module,
   ObjFn *fn, Buffer *buffer)
 {
+  dbgprint("%s.%s\n", module->name ? module->name->value : "core",
+          fn->debug->name ? fn->debug->name : "(script)");
+
   for (int k = 0; k < fn->constants.count; k++)
   {
+    dbgprint("    const %d: ", k);
+
     Value value = fn->constants.data[k];
     if (!SaveValueToBuffer(vm, module, value, buffer))
       return false;
@@ -516,7 +648,7 @@ char *GetModuleFileName(ObjModule *module)
 }
 
 // save all info of a single module to a file.
-static bool SaveModule(WrenVM *vm, ObjModule *module)
+bool SaveCompiledModule(WrenVM *vm, ObjModule *module)
 {
   bool ret = false;
   
@@ -598,33 +730,6 @@ static bool SaveModule(WrenVM *vm, ObjModule *module)
   return ret;
 }
 
-bool WrenSaveBytecode(WrenVM *vm)
-{
-  DumpModules(vm);
-
-  uint32_t actualCount = 0;
-
-  for (uint32_t i = 0; i < vm->modules->capacity; i++)
-  {
-    if (IS_UNDEFINED(vm->modules->entries[i].key)
-      || IS_UNDEFINED(vm->modules->entries[i].value))
-    {
-      continue;
-    }
-
-    actualCount++;
-    ASSERT(actualCount <= vm->modules->count, "too many modules");
-
-    ObjModule *module = AS_MODULE(vm->modules->entries[i].value);
-    if (!SaveModule(vm, module))
-      return false;
-  }
-
-  ASSERT(actualCount == vm->modules->count, "too many or too few modules");
-
-  return true;
-}
-
 void WrenLoaderInit(void)
 {
 
@@ -669,7 +774,7 @@ bool ParseValue(WrenVM *vm, ObjModule *module, uint8_t type,
       }
       break;
 
-    case FN_CONST_TYPE_STR:
+    case FN_CONST_TYPE_STRING:
       *value = wrenNewStringLength(vm, data, length);
       ret = true;
       break;
@@ -701,11 +806,8 @@ bool LoadVariables(Buffer *buffer, WrenVM *vm, ObjModule *module)
 
   bool ret = true;
 
-  for(;;)
+  do
   {
-    if (IsBufferExhausted(buffer))
-      break;
-
     uint32_t *nameLength;
     char     *varName;
     
@@ -731,9 +833,8 @@ bool LoadVariables(Buffer *buffer, WrenVM *vm, ObjModule *module)
     {
       ASSERT(false, "too many variables");
       ret = false;
-      break;
     }
-  }
+  } while(ret && !IsBufferExhausted(buffer));
 
   return ret;
 }
@@ -758,9 +859,6 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
 
   do
   {
-    if (IsBufferExhausted(buffer))
-      break;
-
     uint32_t *nameLength;
     char     *methodName;
     int       symbol;
@@ -777,7 +875,7 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
     }
 
     if (methodName)  free(methodName);
-  } while (ret);
+  } while (ret && !IsBufferExhausted(buffer));
 
   return ret;
 }
@@ -791,9 +889,6 @@ bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
 
   do
   {
-    if (IsBufferExhausted(buffer))
-      break;
-
     uint8_t  *type;
     uint32_t *length;
     char     *data;
@@ -815,7 +910,7 @@ bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
     {
       ret = false;
     }
-  } while (ret);
+  } while (ret && !IsBufferExhausted(buffer));
 
   return ret;  
 }
@@ -830,9 +925,6 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
 
   do
   {
-    if (IsBufferExhausted(indexBuffer))
-      break;
-
     DataDirectory *dataDir;
     FnHeader      *header;
     uint8_t       *code;
@@ -878,7 +970,7 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
     {
       ret = false;
     }
-  } while (ret);
+  } while (ret && !IsBufferExhausted(indexBuffer));
 
   return ret;
 }

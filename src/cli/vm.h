@@ -7,7 +7,7 @@
 // Executes the Wren script at [path] in a new VM.
 //
 // Exits if the script failed or could not be loaded.
-void runFile(const char* path);
+void runFile(const char* path, VM_MODE vmMode);
 
 // Runs the Wren interactive REPL.
 int runRepl();

@@ -20,6 +20,8 @@
   #include <stdio.h>
 #endif
 
+#include "wren_loader.h"
+
 // The behavior of realloc() when the size is 0 is implementation defined. It
 // may return a non-NULL pointer which must not be dereferenced but nevertheless
 // should be freed. To prevent that, we avoid calling realloc() with a zero
@@ -501,11 +503,29 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
     }
   }
 
+  UserData *userData = vm->config.userData;
+  if (userData->vmMode == VM_MODE_COMPILE)
+  {    
+    if (userData->methodCountLevel >= _countof(userData->savedMethodCount))
+    {
+      ASSERT(false, "too many module levels");
+      return NULL;
+    }
+
+    userData->savedMethodCount[userData->methodCountLevel++] = vm->methodNames.count;
+  }
+
   ObjFn* fn = wrenCompile(vm, module, source, isExpression, printErrors);
   if (fn == NULL)
   {
     // TODO: Should we still store the module even if it didn't compile?
     return NULL;
+  }
+
+  if (userData->vmMode == VM_MODE_COMPILE)
+  {
+    SaveCompiledModule(vm, module);
+    userData->methodCountLevel--;
   }
 
   // Functions are always wrapped in closures.
