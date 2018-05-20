@@ -106,8 +106,12 @@ enum FN_CONST_TYPE
   FN_CONST_TYPE_MODULE,
   FN_CONST_TYPE_RANGE,
   FN_CONST_TYPE_STRING,
-  FN_CONST_TYPE_UPVALUE
+  FN_CONST_TYPE_UPVALUE,
 
+  FN_CONST_TYPE_NULL,
+  FN_CONST_TYPE_FALSE,
+  FN_CONST_TYPE_TRUE,
+  FN_CONST_TYPE_UNDEFINED,
   //only append allowed, because the above value will be saved to byte code.
 };
 
@@ -223,6 +227,11 @@ bool BufferSeek(Buffer *buffer, uint32_t offset)
   return false;
 }
 
+void BufferRewind(Buffer *buffer)
+{
+  buffer->consumed = 0;
+}
+
 void BufferSet(Buffer *buffer, char *data, uint32_t length)
 {
   buffer->pointer  = data;
@@ -335,10 +344,12 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
     if (objFn->module != module)
       continue;
 
-    uint16_t operand = *((uint16_t *)&objFn->code.data[info->offset]);
+    uint8_t *operand = (uint8_t *)&objFn->code.data[info->offset];
+    uint16_t symbol = (operand[0] << 8) | operand[1];
+    ASSERT(symbol < vm->methodNames.count, "unexpected method name index");
 
-    const char *data       = vm->methodNames.data[operand]->value;
-    uint32_t    dataLength = vm->methodNames.data[operand]->length;
+    const char *data       = vm->methodNames.data[symbol]->value;
+    uint32_t    dataLength = vm->methodNames.data[symbol]->length;
 
     dbgprint("    method: %s\n", data);
 
@@ -575,12 +586,23 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
     switch (value)
     {
     case NULL_VAL:
+      {
+        TLV_NUM tlvNum;
+        tlvNum.type   = FN_CONST_TYPE_NULL;
+        tlvNum.length = sizeof(tlvNum.value);
+        *((uint64_t *)&tlvNum.value) = NULL_VAL;
+        if (!BufferAppend(buffer, (const char *)&tlvNum, sizeof(tlvNum)))
+          return false;
+      }
       break;
     case FALSE_VAL:
+      ASSERT(false, "add code here to process more types!");
       break;
     case TRUE_VAL:
+      ASSERT(false, "add code here to process more types!");
       break;
     case UNDEFINED_VAL:
+      ASSERT(false, "add code here to process more types!");
       break;
     default:
       ASSERT(false, "add code here to process more types!");
@@ -823,7 +845,7 @@ void wrenLoaderInit(void)
 
 }
 
-bool IsValid(const ModuleFileHeader *header, long int fileSize)
+bool IsValidModuleHeader(const ModuleFileHeader *header)
 {
   if (header->magic != WREN_FILE_MAGIC)
     return false;
@@ -868,7 +890,28 @@ bool ParseValue(WrenVM *vm, ObjModule *module, uint8_t type,
       break;
 
     case FN_CONST_TYPE_FN:
-      ASSERT(false, "add code here to process more types!");
+      {        
+        if (length == sizeof(uint32_t))
+        {
+          uint32_t fnIndex = *((int32_t *)data);
+          ObjFn *objFn = GetObjFn(vm, module, fnIndex);
+          ASSERT(objFn != NULL, "desired fn not created yet");
+          if (objFn)
+          {
+            *value = OBJ_VAL(objFn);
+            ret = true;
+          }
+        }
+      }
+      break;
+
+    case FN_CONST_TYPE_NULL:
+      if (length == sizeof(Value))
+      {
+        *value = *(Value *)data;
+        ASSERT(*value == NULL_VAL, "unintialized variable must be NULL_VAL");
+        ret = true;
+      }
       break;
 
     default:
@@ -1038,7 +1081,7 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
 
 bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
 {
-  if (!buffer->pointer)
+  if (!buffer->pointer || !buffer->length)
     return true;
 
   bool ret = true;
@@ -1074,10 +1117,38 @@ bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
 bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   WrenVM *vm, ObjModule *module)
 {
-  if (!indexBuffer->pointer || !buffer->pointer)
+  if (!indexBuffer->pointer || !buffer->pointer
+    || !indexBuffer->length || !buffer->length)
+  {
     return false;
+  }
 
   bool ret = true;
+
+  //create all ObjFn objects first.
+  do
+  {
+    DataDirectory *dataDir;
+    FnHeader      *header;
+
+    if (BufferConsume(indexBuffer, sizeof(DataDirectory), (char **)&dataDir)
+      && BufferSeek(buffer, dataDir->offset)
+      && BufferConsume(buffer, sizeof(FnHeader), (char **)&header)
+      )
+    {
+      ObjFn *fn = wrenNewFunction(vm, module, header->maxSlots);
+      if (!fn)
+        ret = false;
+    }
+  } while (ret && !IsBufferExhausted(indexBuffer));
+
+  if (!ret)
+    return false;
+
+  BufferRewind(indexBuffer);
+  BufferRewind(buffer);
+
+  uint32_t fnIndex = 0;
 
   do
   {
@@ -1086,6 +1157,7 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
     uint8_t       *code;
     char          *constants;
     char          *debug;
+    ObjFn         *fn;
 
     if (BufferConsume(indexBuffer, sizeof(DataDirectory), (char **)&dataDir)
 
@@ -1101,10 +1173,11 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
 
       && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_DEBUG].offset)
       && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_DEBUG].size, (char **)&debug)
+
+      && (fn = GetObjFn(vm, module, fnIndex)) != NULL
       )
     {
-      ObjFn *fn = wrenNewFunction(vm, module, header->maxSlots);
-      wrenPushRoot(vm, (Obj *)fn);
+      //wrenPushRoot(vm, (Obj *)fn);
       fn->arity       = header->arity;
       fn->numUpvalues = header->numUpvalues;
       //TODO: add function name.
@@ -1120,7 +1193,7 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
           header->dataDir[FN_DATA_DIR_DEBUG].size / sizeof(int));
       }
 
-      wrenPopRoot(vm);
+      //wrenPopRoot(vm);
     }
     else
     {
@@ -1131,20 +1204,27 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   return ret;
 }
 
+//TODO: disable GC first.
 bool wrenLoadModule(WrenVM *vm, const char *moduleName)
 {
-  Value name = wrenNewString(vm, moduleName);  
+  Value name;
+  
+  if (_stricmp(moduleName, CORE_MODULE_NAME))
+    name = wrenNewString(vm, moduleName);    
+  else
+    name = NULL_VAL;
+
   ObjModule* module = getModule(vm, name);
-  if (module)
+  if (module && name != NULL_VAL)
     return true;
 
-  wrenPushRoot(vm, AS_OBJ(name));
-  module = wrenNewModule(vm , AS_STRING(name));
-  wrenPushRoot(vm, (Obj *)module);
-
-  // Implicitly import the core module.
-  if (_stricmp(moduleName, CORE_MODULE_NAME))
+  if (name != NULL_VAL)
   {
+    wrenPushRoot(vm, AS_OBJ(name));
+    module = wrenNewModule(vm, AS_STRING(name));
+    wrenPushRoot(vm, (Obj *)module);
+
+    // Implicitly import the core module.
     ObjModule* coreModule = getModule(vm, NULL_VAL);
     for (int i = 0; i < coreModule->variables.count; i++)
     {
@@ -1170,31 +1250,26 @@ bool wrenLoadModule(WrenVM *vm, const char *moduleName)
   char *fileName = NULL;  
   FILE *f        = NULL;
   ModuleFileHeader header;
-  long int         fileSize = 0;
 
   if ((fileName = GetModuleFilePath(moduleName)) != NULL
     && (f = fopen(fileName, "rb")) != NULL
-    && fseek(f, SEEK_END, 0) == 0
-    && (fileSize = ftell(f)) != -1L
-
-    && fseek(f, SEEK_SET, 0) == 0
     && fread(&header, 1, sizeof(header), f) == sizeof(header)
-    && IsValid(&header, fileSize)
+    && IsValidModuleHeader(&header)
 
     && BufferInitSize(&variableBuffer, header.dataDir[MODULE_DATA_DIR_VARIABLE].size)
-    && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_VARIABLE].offset) == 0
+    && fseek(f, header.dataDir[MODULE_DATA_DIR_VARIABLE].offset, SEEK_SET) == 0
     && fread(variableBuffer.pointer, 1, variableBuffer.capacity, f) == variableBuffer.capacity
 
     && BufferInitSize(&fnIndexBuffer, header.dataDir[MODULE_DATA_DIR_FN_INDEX].size)
-    && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_FN_INDEX].offset) == 0
+    && fseek(f, header.dataDir[MODULE_DATA_DIR_FN_INDEX].offset, SEEK_SET) == 0
     && fread(fnIndexBuffer.pointer, 1, fnIndexBuffer.capacity, f) == fnIndexBuffer.capacity
 
     && BufferInitSize(&fnBuffer, header.dataDir[MODULE_DATA_DIR_FN].size)
-    && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_FN].offset) == 0
+    && fseek(f, header.dataDir[MODULE_DATA_DIR_FN].offset, SEEK_SET) == 0
     && fread(fnBuffer.pointer, 1, fnBuffer.capacity, f) == fnBuffer.capacity
 
     && BufferInitSize(&methodNameBuffer, header.dataDir[MODULE_DATA_DIR_METHOD].size)
-    && fseek(f, SEEK_SET, header.dataDir[MODULE_DATA_DIR_METHOD].offset) == 0
+    && fseek(f, header.dataDir[MODULE_DATA_DIR_METHOD].offset, SEEK_SET) == 0
     && fread(methodNameBuffer.pointer, 1, methodNameBuffer.capacity, f) == methodNameBuffer.capacity
     )
   {
@@ -1222,9 +1297,12 @@ bool wrenLoadModule(WrenVM *vm, const char *moduleName)
     // multiple times.
     wrenMapSet(vm, vm->modules, name, OBJ_VAL(module));
   }
-
-  wrenPopRoot(vm);
-  wrenPopRoot(vm);
+  
+  if (name != NULL_VAL)
+  {
+    wrenPopRoot(vm); //module
+    wrenPopRoot(vm); //name
+  }
 
   if (ret)
   {
