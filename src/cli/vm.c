@@ -207,7 +207,17 @@ static void freeVM()
   free(loop);
   
   if (vm->config.userData)
+  {
+    UserData *userData = (UserData *)vm->config.userData;
+    MethodNameInfo *info = userData->methodNameInfo;
+    while (info)
+    {
+      MethodNameInfo *t = info;
+      info = info->next;
+      free(t);
+    }
     free(vm->config.userData);
+  }
 
   wrenFreeVM(vm);
 
