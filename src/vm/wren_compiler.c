@@ -3335,7 +3335,7 @@ static void import(Compiler* compiler)
   ignoreNewlines(compiler);
   consume(compiler, TOKEN_STRING, "Expect a string after 'import'.");
 
-  UserData *userData = compiler->parser->vm->config.userData;
+  UserData *userData = (UserData *)compiler->parser->vm->config.userData;
   if (userData->vmMode == VM_MODE_COMPILE)
   {
     Value valClosure = wrenImportModule(compiler->parser->vm, compiler->parser->previous.value);

@@ -503,18 +503,6 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
     }
   }
 
-  UserData *userData = vm->config.userData;
-  if (userData->vmMode == VM_MODE_COMPILE)
-  {    
-    if (userData->methodCountLevel >= _countof(userData->savedMethodCount))
-    {
-      ASSERT(false, "too many module levels");
-      return NULL;
-    }
-
-    userData->savedMethodCount[userData->methodCountLevel++] = vm->methodNames.count;
-  }
-
   ObjFn* fn = wrenCompile(vm, module, source, isExpression, printErrors);
   if (fn == NULL)
   {
@@ -522,10 +510,10 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
     return NULL;
   }
 
+  UserData *userData = (UserData *)vm->config.userData;
   if (userData->vmMode == VM_MODE_COMPILE)
   {
-    SaveCompiledModule(vm, module);
-    userData->methodCountLevel--;
+    wrenSaveCompiledModule(vm, module);
   }
 
   // Functions are always wrapped in closures.
@@ -773,7 +761,7 @@ Value wrenImportModule(WrenVM* vm, Value name)
 // The main bytecode interpreter loop. This is where the magic happens. It is
 // also, as you can imagine, highly performance critical. Returns `true` if the
 // fiber completed without error.
-static WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
+WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
 {
   // Remember the current fiber so we can find it if a GC happens.
   vm->fiber = fiber;

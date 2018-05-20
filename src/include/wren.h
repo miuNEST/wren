@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // The Wren semantic version number components.
 #define WREN_VERSION_MAJOR 0
@@ -220,15 +221,18 @@ typedef enum VM_MODE
   VM_MODE_BYTECODE,   //run *.wrc bytecode file.
 } VM_MODE;
 
+typedef struct MethodNameInfo
+{
+  void                  *objFn;
+  uint32_t               offset;    //offset relative to the start of objFn opcode.
+  struct MethodNameInfo *next;
+} MethodNameInfo;
+
 typedef struct UserData
 {
-  int     size;
-
-  VM_MODE vmMode;
-
-  //count of methodNames before we compile a module. It's a saved stack.
-  int  savedMethodCount[16];
-  int  methodCountLevel;
+  int             size;
+  VM_MODE         vmMode;
+  MethodNameInfo *methodNameInfo;
 } UserData;
 
 typedef enum

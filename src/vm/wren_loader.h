@@ -5,10 +5,13 @@
 #include "wren_vm.h"
 #include "wren.h"
 
-void WrenSaverInit(void);
-bool SaveCompiledModule(WrenVM *vm, ObjModule *module);
+#define CORE_MODULE_NAME    "core"
+#define MODULE_NAME(module) ((module)->name ? (module)->name->value : CORE_MODULE_NAME)
 
-void WrenLoaderInit(void);
+void wrenSaverInit(void);
+bool wrenSaveCompiledModule(WrenVM *vm, ObjModule *module);
 
+void wrenLoaderInit(void);
+bool wrenLoadModule(WrenVM *vm, const char *moduleName);
 
 #endif

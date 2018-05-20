@@ -11,6 +11,7 @@
 #include "wren_value.h"
 
 #include "wren_core.wren.inc"
+#include "wren_loader.h"
 
 DEF_PRIMITIVE(bool_not)
 {
@@ -1173,7 +1174,19 @@ void wrenInitializeCore(WrenVM* vm)
   //   '---------'   '-------------------'            -'
 
   // The rest of the classes can now be defined normally.
-  wrenInterpretInModule(vm, NULL, coreModuleSource);
+  UserData *userData = (UserData *)vm->config.userData;
+  if (userData->vmMode == VM_MODE_BYTECODE)
+  {
+    if (!wrenLoadModule(vm, CORE_MODULE_NAME))
+    {
+      ASSERT(false, "failed to load core module byte code");
+      //TODO: Ö´ÐÐÊ§°ÜÁ÷³Ì
+    }
+  }
+  else
+  {
+    wrenInterpretInModule(vm, NULL, coreModuleSource);
+  }
 
   vm->boolClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Bool"));
   PRIMITIVE(vm->boolClass, "toString", bool_toString);
