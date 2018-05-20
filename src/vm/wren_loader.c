@@ -136,13 +136,14 @@ typedef struct Buffer
   uint32_t length;
   uint32_t capacity;
   uint32_t consumed;
+  uint32_t consumeLimit;
 } Buffer;
 
 extern const char *rootDirectory;
 
-bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
-  Value value, Buffer *buffer);
+bool SaveValueToBuffer(WrenVM *vm, ObjModule *module, Value value, Buffer *buffer);
 uint32_t GetFnIndex(WrenVM *vm, ObjModule *module, ObjFn *fnTarget);
+ObjFn *GetObjFn(WrenVM *vm, ObjModule *module, uint32_t fnIndex);
 
 void BufferInit(Buffer *buffer)
 {
@@ -150,6 +151,7 @@ void BufferInit(Buffer *buffer)
   buffer->length   = 0;
   buffer->capacity = 0;
   buffer->consumed = 0;
+  buffer->consumeLimit = 0;
 }
 
 bool BufferInitSize(Buffer *buffer, uint32_t size)
@@ -170,6 +172,7 @@ bool BufferInitSize(Buffer *buffer, uint32_t size)
 
   buffer->length   = 0;
   buffer->consumed = 0;
+  buffer->consumeLimit = 0;
 
   return true;
 }
@@ -193,6 +196,7 @@ bool BufferAppend(Buffer *buffer, const char *data, uint32_t dataLength)
 
   memcpy(buffer->pointer + buffer->length, data, dataLength);
   buffer->length += dataLength;
+  buffer->consumeLimit = buffer->length;
 
   return true;
 }
@@ -208,6 +212,12 @@ bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char **data)
   if (buffer->length - buffer->consumed < lenDesired)
   {
     ASSERT(false, "no enough data to consume");
+    return false;
+  }
+
+  if (buffer->consumeLimit - buffer->consumed < lenDesired)
+  {
+    ASSERT(false, "consume limit reached");
     return false;
   }
 
@@ -232,17 +242,27 @@ void BufferRewind(Buffer *buffer)
   buffer->consumed = 0;
 }
 
+void BufferSetLimit(Buffer *buffer, uint32_t limit)
+{
+  ASSERT(buffer->consumed <= limit
+    && limit <= buffer->length, "illegal consume limit");
+
+  buffer->consumeLimit = limit;
+}
+
 void BufferSet(Buffer *buffer, char *data, uint32_t length)
 {
   buffer->pointer  = data;
   buffer->length   = length;
   buffer->capacity = length;
   buffer->consumed = 0;
+  buffer->consumeLimit = length;
 }
 
 bool IsBufferExhausted(const Buffer *buffer)
 {
-  return buffer->consumed == buffer->length;
+  return (buffer->consumed == buffer->length
+    || buffer->consumed == buffer->consumeLimit);
 }
 
 void BufferFree(Buffer *buffer)
@@ -254,6 +274,8 @@ void BufferFree(Buffer *buffer)
     buffer->pointer  = NULL;
     buffer->length   = 0;
     buffer->capacity = 0;
+    buffer->consumed = 0;
+    buffer->consumeLimit = 0;
   }
 }
 
@@ -1054,16 +1076,23 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
   if (BufferConsume(buffer, sizeof(DataDirectory) * 2, (char **)&dataDir)
     && BufferSeek(buffer, dataDir[METHOD_DATA_DIR_NAME].offset))
   {
+    BufferSetLimit(buffer, 
+      dataDir[METHOD_DATA_DIR_NAME].offset + dataDir[METHOD_DATA_DIR_NAME].size);
+
     uint32_t *length;
     char     *name;
     while (BufferConsume(buffer, sizeof(uint32_t), (char **)&length)
-      && !BufferConsume(buffer, *length, (char **)&name))
+      && BufferConsume(buffer, *length, (char **)&name))
     {
       wrenSymbolTableEnsure(vm, &methodNames, name, *length);
+      dbgprint("%p, method: %s\n", &buffer->pointer[buffer->consumed], name);
     }
 
     if (BufferSeek(buffer, dataDir[METHOD_DATA_DIR_REBIND].offset))
     {
+      BufferSetLimit(buffer,
+        dataDir[METHOD_DATA_DIR_REBIND].offset + dataDir[METHOD_DATA_DIR_REBIND].size);
+
       MethodNameRebind *rebindInfo;
       while (BufferConsume(buffer, sizeof(MethodNameRebind), (char **)&rebindInfo))
       {
