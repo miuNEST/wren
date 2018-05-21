@@ -1256,15 +1256,32 @@ WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
     }
     
     CASE_CODE(IMPORT_MODULE):
-    {
+    {      
       Value name = fn->constants.data[READ_SHORT()];
 
-      // Make a slot on the stack for the module's fiber to place the return
-      // value. It will be popped after this fiber is resumed. Store the
-      // imported module's closure in the slot in case a GC happens when
-      // invoking the closure.
-      PUSH(wrenImportModule(vm, name));
-      
+      UserData *userData = (UserData *)vm->config.userData;
+      if (userData->vmMode == VM_MODE_BYTECODE)
+      {
+        char *moduleName = AS_STRING(name)->value;
+        ObjClosure *Objclosure;
+        if (!wrenLoadCompiledModule(vm, moduleName, false, &Objclosure))
+        {
+          ASSERT(false, "failed to load core module byte code");
+          //TODO: Ö´ÐÐÊ§°ÜÁ÷³Ì
+          RUNTIME_ERROR();
+        }
+
+        PUSH(OBJ_VAL(Objclosure));
+      }
+      else
+      {
+        // Make a slot on the stack for the module's fiber to place the return
+        // value. It will be popped after this fiber is resumed. Store the
+        // imported module's closure in the slot in case a GC happens when
+        // invoking the closure.
+        PUSH(wrenImportModule(vm, name));
+      }
+
       if (!IS_NULL(fiber->error)) RUNTIME_ERROR();
 
       // If we get a closure, call it to execute the module body.

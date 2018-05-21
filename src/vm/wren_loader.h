@@ -10,6 +10,7 @@
 
 bool wrenSaveCompiledModule(WrenVM *vm, ObjModule *module);
 
-bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName);
+bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
+  bool runClosure, ObjClosure **closure);
 
 #endif

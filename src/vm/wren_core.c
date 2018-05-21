@@ -1177,7 +1177,7 @@ void wrenInitializeCore(WrenVM* vm)
   UserData *userData = (UserData *)vm->config.userData;
   if (userData->vmMode == VM_MODE_BYTECODE)
   {
-    if (!wrenLoadCompiledModule(vm, CORE_MODULE_NAME))
+    if (!wrenLoadCompiledModule(vm, CORE_MODULE_NAME, true, NULL))
     {
       ASSERT(false, "failed to load core module byte code");
       //TODO: Ö´ÐÐÊ§°ÜÁ÷³Ì

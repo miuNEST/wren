@@ -234,12 +234,13 @@ bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char **data)
 
 bool BufferSeek(Buffer *buffer, uint32_t offset)
 {
-  if (offset < buffer->consumeLimit)
+  if (offset < buffer->length)
   {
     buffer->consumed = offset;
     return true;
   }
 
+  ASSERT(false, "unexpected buffer offset");
   return false;
 }
 
@@ -1149,6 +1150,9 @@ static bool RebindMethodNames(WrenVM *vm, ObjModule *module,
   *operand++ = (uint8_t)(newIndex >> 8);
   *operand   = (uint8_t)newIndex;
 
+  dbgprint("rebind old index = %u, new index = %u, '%s'\n",
+    rebindInfo->nameIndex, newIndex, methodNames->data[rebindInfo->nameIndex]->value);
+
   return true;
 }
 
@@ -1388,7 +1392,8 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
 }
 
 //TODO: disable GC first.
-bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName)
+bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
+  bool runClosure, ObjClosure **objClosure)
 {
   Value name;
   
@@ -1498,14 +1503,22 @@ bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName)
       return false;
     }
 
-    wrenPushRoot(vm, (Obj *)closure);
-    ObjFiber* fiber = wrenNewFiber(vm, closure);
-    wrenPopRoot(vm);
+    if (runClosure)
+    {
+      wrenPushRoot(vm, (Obj *)closure);
+      ObjFiber* fiber = wrenNewFiber(vm, closure);
+      wrenPopRoot(vm);
 
-    if (!fiber)
-      return false;
-    
-    return runInterpreter(vm, fiber) == WREN_RESULT_SUCCESS;
+      if (!fiber)
+        return false;
+
+      return runInterpreter(vm, fiber) == WREN_RESULT_SUCCESS;
+    }
+    else
+    {
+      *objClosure = closure;
+      return true;
+    }
   }
 
   return ret;

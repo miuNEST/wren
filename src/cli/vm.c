@@ -244,7 +244,7 @@ void runFile(const char* path, VM_MODE vmMode)
     else
       moduleName = path;
 
-    if (wrenLoadCompiledModule(vm, moduleName))
+    if (wrenLoadCompiledModule(vm, moduleName, true, NULL))
       result = WREN_RESULT_SUCCESS;
     else
     {
