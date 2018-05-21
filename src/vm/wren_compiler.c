@@ -390,8 +390,6 @@ static const int stackEffects[] = {
   #undef OPCODE
 };
 
-bool wrenAddMethodRebindInfo(Compiler *compiler);
-
 static void printError(Parser* parser, int line, const char* label,
                        const char* format, va_list args)
 {
@@ -1822,7 +1820,6 @@ static void callSignature(Compiler* compiler, Code instruction,
 {
   int symbol = signatureSymbol(compiler, signature);
   emitShortArg(compiler, (Code)(instruction + signature->arity), symbol);
-  wrenAddMethodRebindInfo(compiler);
 
   if (instruction == CODE_SUPER_0)
   {
@@ -1844,7 +1841,6 @@ static void callMethod(Compiler* compiler, int numArgs, const char* name,
 {
   int symbol = methodSymbol(compiler, name, length);
   emitShortArg(compiler, (Code)(CODE_CALL_0 + numArgs), symbol);
-  wrenAddMethodRebindInfo(compiler);
 }
 
 // Compiles an (optional) argument list for a method call with [methodSignature]
@@ -2704,7 +2700,7 @@ void expression(Compiler* compiler)
 
 // Returns the number of arguments to the instruction at [ip] in [fn]'s
 // bytecode.
-static int getNumArguments(const uint8_t* bytecode, const Value* constants,
+int getNumArguments(const uint8_t* bytecode, const Value* constants,
                            int ip)
 {
   Code instruction = (Code)bytecode[ip];
@@ -3099,7 +3095,6 @@ static void createConstructor(Compiler* compiler, Signature* signature,
   // Run its initializer.
   emitShortArg(&methodCompiler, (Code)(CODE_CALL_0 + signature->arity),
                initializerSymbol);
-  wrenAddMethodRebindInfo(compiler);
 
   // Return the instance.
   emitOp(&methodCompiler, CODE_RETURN);
@@ -3122,7 +3117,6 @@ static void defineMethod(Compiler* compiler, Variable classVariable,
   // Define the method.
   Code instruction = isStatic ? CODE_METHOD_STATIC : CODE_METHOD_INSTANCE;
   emitShortArg(compiler, instruction, methodSymbol);
-  wrenAddMethodRebindInfo(compiler);
 }
 
 // Declares a method in the enclosing class with [signature].
@@ -3596,26 +3590,4 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
     compiler = compiler->parent;
   }
   while (compiler != NULL);
-}
-
-static bool wrenAddMethodRebindInfo(Compiler *compiler)
-{
-  UserData *userData = (UserData *)compiler->parser->vm->config.userData;
-  if (userData->vmMode == VM_MODE_COMPILE)
-  {
-    MethodNameInfo *info = (MethodNameInfo *)malloc(sizeof(MethodNameInfo));
-    if (!info)
-    {
-      //TODO: do error processing here: abort compiling.
-      return false;
-    }
-
-    info->objFn = (void *)compiler->fn;
-    info->offset = compiler->fn->code.count - sizeof(uint16_t);
-
-    info->next = userData->methodNameInfo;
-    userData->methodNameInfo = info;
-  }
-
-  return true;
 }

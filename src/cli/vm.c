@@ -208,14 +208,6 @@ static void freeVM()
   
   if (vm->config.userData)
   {
-    UserData *userData = (UserData *)vm->config.userData;
-    MethodNameInfo *info = userData->methodNameInfo;
-    while (info)
-    {
-      MethodNameInfo *t = info;
-      info = info->next;
-      free(t);
-    }
     free(vm->config.userData);
   }
 
@@ -238,16 +230,39 @@ void runFile(const char* path, VM_MODE vmMode)
     rootDirectory = root;
   }
 
-  char* source = readFile(path);
-  if (source == NULL)
-  {
-    fprintf(stderr, "Could not find file \"%s\".\n", path);
-    exit(66);
-  }
-
   initVM(vmMode);
 
-  WrenInterpretResult result = wrenInterpret(vm, source);
+  char* source = NULL;
+  WrenInterpretResult result;
+
+  if (vmMode == VM_MODE_BYTECODE)
+  {
+    const char *moduleName;
+    const char* lastSlash = strrchr(path, '/');
+    if (lastSlash)
+      moduleName = lastSlash + 1;
+    else
+      moduleName = path;
+
+    if (wrenLoadCompiledModule(vm, moduleName))
+      result = WREN_RESULT_SUCCESS;
+    else
+    {
+      ASSERT(false, "failed to execute byte code file");
+      result = WREN_RESULT_RUNTIME_ERROR;
+    }
+  }
+  else
+  {
+    char* source = readFile(path);
+    if (source == NULL)
+    {
+      fprintf(stderr, "Could not find file \"%s\".\n", path);
+      exit(66);
+    }
+
+    result = wrenInterpret(vm, source);
+  }
 
   if (afterLoadFn != NULL) afterLoadFn(vm);
   

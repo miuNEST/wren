@@ -139,6 +139,12 @@ typedef struct Buffer
   uint32_t consumeLimit;
 } Buffer;
 
+typedef struct MethodNameInfo
+{
+  ObjFn                 *objFn;
+  uint32_t               offset;    //offset relative to the start of objFn opcode.
+} MethodNameInfo;
+
 extern const char *rootDirectory;
 
 bool SaveValueToBuffer(WrenVM *vm, ObjModule *module, Value value, Buffer *buffer);
@@ -147,10 +153,10 @@ ObjFn *GetObjFn(WrenVM *vm, ObjModule *module, uint32_t fnIndex);
 
 void BufferInit(Buffer *buffer)
 {
-  buffer->pointer  = NULL;
-  buffer->length   = 0;
-  buffer->capacity = 0;
-  buffer->consumed = 0;
+  buffer->pointer      = NULL;
+  buffer->length       = 0;
+  buffer->capacity     = 0;
+  buffer->consumed     = 0;
   buffer->consumeLimit = 0;
 }
 
@@ -170,8 +176,8 @@ bool BufferInitSize(Buffer *buffer, uint32_t size)
     buffer->capacity = 0;
   }
 
-  buffer->length   = 0;
-  buffer->consumed = 0;
+  buffer->length       = 0;
+  buffer->consumed     = 0;
   buffer->consumeLimit = 0;
 
   return true;
@@ -209,15 +215,15 @@ bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char **data)
     return true;
   }
 
-  if (buffer->length - buffer->consumed < lenDesired)
-  {
-    ASSERT(false, "no enough data to consume");
-    return false;
-  }
-
   if (buffer->consumeLimit - buffer->consumed < lenDesired)
   {
     ASSERT(false, "consume limit reached");
+    return false;
+  }
+
+  if (buffer->length - buffer->consumed < lenDesired)
+  {
+    ASSERT(false, "no enough data to consume");
     return false;
   }
 
@@ -228,7 +234,7 @@ bool BufferConsume(Buffer *buffer, uint32_t lenDesired, char **data)
 
 bool BufferSeek(Buffer *buffer, uint32_t offset)
 {
-  if (offset < buffer->length)
+  if (offset < buffer->consumeLimit)
   {
     buffer->consumed = offset;
     return true;
@@ -252,80 +258,128 @@ void BufferSetLimit(Buffer *buffer, uint32_t limit)
 
 void BufferSet(Buffer *buffer, char *data, uint32_t length)
 {
-  buffer->pointer  = data;
-  buffer->length   = length;
-  buffer->capacity = length;
-  buffer->consumed = 0;
+  buffer->pointer      = data;
+  buffer->length       = length;
+  buffer->capacity     = length;
+  buffer->consumed     = 0;
   buffer->consumeLimit = length;
 }
 
 bool IsBufferExhausted(const Buffer *buffer)
 {
-  return (buffer->consumed == buffer->length
-    || buffer->consumed == buffer->consumeLimit);
+  return (buffer->consumed == buffer->consumeLimit
+    || buffer->consumed == buffer->length);
 }
 
 void BufferFree(Buffer *buffer)
 {
   if (buffer->pointer)
-  {
     free(buffer->pointer);
 
-    buffer->pointer  = NULL;
-    buffer->length   = 0;
-    buffer->capacity = 0;
-    buffer->consumed = 0;
-    buffer->consumeLimit = 0;
-  }
+  buffer->pointer      = NULL;
+  buffer->length       = 0;
+  buffer->capacity     = 0;
+  buffer->consumed     = 0;
+  buffer->consumeLimit = 0;
 }
 
-void wrenSaverInit(void)
+static bool GetFnMethodNameInfo(ObjFn* fn, Buffer *buffer)
 {
+  int ip = 0;
 
-}
-
-static bool DumpMethodNames(WrenVM *vm)
-{
-  for (int i = 0; i < vm->methodNames.count; i++)
+  for (;;)
   {
-    printf("    methodNames %d: %s\n", i, vm->methodNames.data[i]->value);
-  }
+    Code instruction = (Code)fn->code.data[ip];
+    switch (instruction)
+    {
+    case CODE_SUPER_0:
+    case CODE_SUPER_1:
+    case CODE_SUPER_2:
+    case CODE_SUPER_3:
+    case CODE_SUPER_4:
+    case CODE_SUPER_5:
+    case CODE_SUPER_6:
+    case CODE_SUPER_7:
+    case CODE_SUPER_8:
+    case CODE_SUPER_9:
+    case CODE_SUPER_10:
+    case CODE_SUPER_11:
+    case CODE_SUPER_12:
+    case CODE_SUPER_13:
+    case CODE_SUPER_14:
+    case CODE_SUPER_15:
+    case CODE_SUPER_16:
 
-  printf("\n");
+    case CODE_CALL_0:
+    case CODE_CALL_1:
+    case CODE_CALL_2:
+    case CODE_CALL_3:
+    case CODE_CALL_4:
+    case CODE_CALL_5:
+    case CODE_CALL_6:
+    case CODE_CALL_7:
+    case CODE_CALL_8:
+    case CODE_CALL_9:
+    case CODE_CALL_10:
+    case CODE_CALL_11:
+    case CODE_CALL_12:
+    case CODE_CALL_13:
+    case CODE_CALL_14:
+    case CODE_CALL_15:
+    case CODE_CALL_16:
+
+    case CODE_METHOD_STATIC:
+    case CODE_METHOD_INSTANCE:
+      {
+        MethodNameInfo nameInfo;
+        nameInfo.objFn  = fn;
+        nameInfo.offset = ip + 1;
+        if (!BufferAppend(buffer, (const char *)&nameInfo, sizeof(nameInfo)))
+        {
+          ASSERT(false, "out of memory");
+          return false;
+        }
+      }
+      break;
+
+    case CODE_END:
+      return true;
+
+    default:
+      break;
+    }
+
+    ip += 1 + getNumArguments(fn->code.data, fn->constants.data, ip);
+  }
 
   return true;
 }
 
-static bool DumpModules(WrenVM *vm)
+static bool GetModuleMethodNameInfo(WrenVM *vm, ObjModule *module, Buffer *buffer)
 {
-  uint32_t actualCount = 0;
+  bool ret = true;
 
-  for (uint32_t i = 0; i < vm->modules->capacity; i++)
+  uint32_t index = 0;
+
+  for (Obj *obj = vm->first; obj; obj = obj->next)
   {
-    if (IS_UNDEFINED(vm->modules->entries[i].key)
-      || IS_UNDEFINED(vm->modules->entries[i].value))
-    {
+    if (obj->type != OBJ_FN)
       continue;
-    }
 
-    actualCount++;
-    ASSERT(actualCount <= vm->modules->count, "too many modules");
+    ObjFn *fn = (ObjFn *)obj;
+    if (fn->module != module)
+      continue;
 
-    ObjModule *module = AS_MODULE(vm->modules->entries[i].value);
-
-    printf("module: %s\n", MODULE_NAME(module));
-
-    for (int k = 0; k < module->variableNames.count; k++)
+    if (!GetFnMethodNameInfo(fn, buffer))
     {
-      printf("    variableNames %d: %s\n", k, module->variableNames.data[k]->value);
+      ret = false;
+      break;
     }
-    printf("\n");
 
+    index++;
   }
 
-  ASSERT(actualCount == vm->modules->count, "too many or too few modules");
-
-  return true;
+  return ret;
 }
 
 static bool SaveMethodNamesToBuffer(WrenVM *vm, ObjModule *module,
@@ -350,6 +404,15 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
 
   dbgprint("module %s\n", MODULE_NAME(module));
 
+  Buffer infoBuffer;
+  BufferInit(&infoBuffer);
+
+  if (!GetModuleMethodNameInfo(vm, module, &infoBuffer))
+  {
+    BufferFree(&infoBuffer);
+    return false;
+  }
+
   Buffer nameBuffer;
   Buffer rebindBuffer;
 
@@ -359,12 +422,32 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
   SymbolTable methodNames;
   wrenSymbolTableInit(&methodNames);
 
-  UserData *userData = (UserData *)vm->config.userData;
-  for(MethodNameInfo *info = userData->methodNameInfo; info; info = info->next)
+  MethodNameInfo *info;
+  while(!IsBufferExhausted(&infoBuffer)
+    && BufferConsume(&infoBuffer, sizeof(MethodNameInfo), (char **)&info))
   {
     ObjFn *objFn = info->objFn;
-    if (objFn->module != module)
-      continue;
+
+    if (info->offset < 1)
+    {
+      ASSERT(false, "bad offset of operand");
+      ret = false;
+      break;
+    }
+
+    uint8_t instruction = objFn->code.data[info->offset - 1];
+    ASSERT(instruction == CODE_METHOD_INSTANCE
+      || instruction == CODE_METHOD_STATIC
+      || (CODE_CALL_0 <= instruction && instruction <= CODE_CALL_16)
+      || (CODE_SUPER_0 <= instruction && instruction <= CODE_SUPER_16),
+      "unexpected instruction");
+
+    if (info->offset + sizeof(uint16_t) > (uint32_t)objFn->code.count)
+    {
+      ASSERT(false, "instruction out of bounds");
+      ret = false;
+      break;
+    }
 
     uint8_t *operand = (uint8_t *)&objFn->code.data[info->offset];
     uint16_t symbol = (operand[0] << 8) | operand[1];
@@ -373,14 +456,13 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
     const char *data       = vm->methodNames.data[symbol]->value;
     uint32_t    dataLength = vm->methodNames.data[symbol]->length;
 
-    dbgprint("    method: %s\n", data);
-
     int index = wrenSymbolTableEnsure(vm, &methodNames, data, dataLength);
 
     MethodNameRebind rebindInfo;
     rebindInfo.fnIndex   = GetFnIndex(vm, module, objFn);
     if (rebindInfo.fnIndex == (uint32_t)-1)
     {
+      ASSERT(false, "fn not found");
       ret = false;
       break;
     }
@@ -388,12 +470,18 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
     rebindInfo.offset    = info->offset;
     rebindInfo.nameIndex = index;
     
+    dbgprint("    method %u ('%s'), fn = %u (0x%p), offset = 0x%x(%u), code count = %d\n",
+      index, data, rebindInfo.fnIndex, objFn, info->offset, info->offset,
+      objFn->code.count);
+
     if (!BufferAppend(&rebindBuffer, (const char *)&rebindInfo, sizeof(rebindInfo)))
     {
       ret = false;
       break;
     }
   }
+
+  BufferFree(&infoBuffer);
 
   if (ret && SaveMethodNamesToBuffer(vm, module, &methodNames, &nameBuffer))
   {
@@ -402,11 +490,11 @@ static bool SaveModuleMethodToBuffer(WrenVM *vm, ObjModule *module, Buffer *buff
     uint32_t offset = sizeof(dataDir);
 
     dataDir[METHOD_DATA_DIR_NAME].offset = offset;
-    dataDir[METHOD_DATA_DIR_NAME].size = nameBuffer.length;
+    dataDir[METHOD_DATA_DIR_NAME].size   = nameBuffer.length;
     offset += dataDir[METHOD_DATA_DIR_NAME].size;
 
     dataDir[METHOD_DATA_DIR_REBIND].offset = offset;
-    dataDir[METHOD_DATA_DIR_REBIND].size = rebindBuffer.length;
+    dataDir[METHOD_DATA_DIR_REBIND].size   = rebindBuffer.length;
 
     if (!BufferAppend(buffer, (const char *)dataDir, sizeof(dataDir))
       || !BufferAppend(buffer, (const char *)nameBuffer.pointer, nameBuffer.length)
@@ -700,23 +788,23 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
     header.dataDir[FN_DATA_DIR_CONSTANTS].offset = offset;
     offset += header.dataDir[FN_DATA_DIR_CONSTANTS].size;
 
-    header.dataDir[FN_DATA_DIR_DEBUG].size   = fn->debug->sourceLines.count;
+    uint16_t numDebugBytes = fn->debug->sourceLines.count
+                              * sizeof(fn->debug->sourceLines.data[0]);
+    header.dataDir[FN_DATA_DIR_DEBUG].size   = numDebugBytes;
     header.dataDir[FN_DATA_DIR_DEBUG].offset = offset;
 
     uint32_t oldOffset = buffer->length;
 
-    if (!BufferAppend(buffer, (const char *)&header, sizeof(header))
-      || !BufferAppend(buffer, fn->code.data, fn->code.count)
-      || !BufferAppend(buffer, constantBuffer.pointer, constantBuffer.length)
-      || !BufferAppend(buffer, (const char *)fn->debug->sourceLines.data, 
-          fn->debug->sourceLines.count * sizeof(int)))
+    ret = BufferAppend(buffer, (const char *)&header, sizeof(header))
+      && BufferAppend(buffer, fn->code.data, fn->code.count)
+      && BufferAppend(buffer, constantBuffer.pointer, constantBuffer.length)
+      && BufferAppend(buffer, (const char *)fn->debug->sourceLines.data,
+        numDebugBytes);
+    BufferFree(&constantBuffer);
+    if (!ret)
     {
-      ret = false;
-      BufferFree(&constantBuffer);
       break;
     }
-
-    BufferFree(&constantBuffer);
 
     DataDirectory dataDir;
     dataDir.offset = oldOffset;     //offset relative to beginning of dataDir[MODULE_DATA_DIR_FN];
@@ -743,6 +831,13 @@ char *GetModuleFilePath(const char *moduleName)
 {
   static const char suffix[] = ".wrc";
 
+  bool hasSuffix = false;
+  size_t len = strlen(moduleName);
+  if (len > sizeof(suffix) - 1)
+  {
+    hasSuffix = _stricmp(moduleName + len - (sizeof(suffix) - 1), suffix) == 0;
+  }
+
   char *name = NULL;
 
   if (rootDirectory)
@@ -752,7 +847,8 @@ char *GetModuleFilePath(const char *moduleName)
     {
       strcpy(name, rootDirectory);
       strcat(name, moduleName);
-      strcat(name, suffix);
+      if (!hasSuffix)
+        strcat(name, suffix);
     }
   }
   else
@@ -761,7 +857,8 @@ char *GetModuleFilePath(const char *moduleName)
     if (name)
     {
       strcpy(name, moduleName);
-      strcat(name, suffix);
+      if (!hasSuffix)
+        strcat(name, suffix);
     }
   }
 
@@ -860,11 +957,6 @@ bool wrenSaveCompiledModule(WrenVM *vm, ObjModule *module)
   BufferFree(&fnIndexBuffer);
 
   return ret;
-}
-
-void wrenLoaderInit(void)
-{
-
 }
 
 bool IsValidModuleHeader(const ModuleFileHeader *header)
@@ -1019,21 +1111,30 @@ static bool RebindMethodNames(WrenVM *vm, ObjModule *module,
   MethodNameRebind *rebindInfo, SymbolTable *methodNames)
 {
   if (rebindInfo->nameIndex >= (uint32_t)methodNames->count)
+  {
+    ASSERT(false, "method name index out of bounds");
     return false;
+  }
 
   ObjFn *objFn = GetObjFn(vm, module, rebindInfo->fnIndex);
   if (!objFn)
+  {
+    ASSERT(false, "fn not found");
     return false;
+  }
 
   if (rebindInfo->offset + sizeof(uint16_t) > (uint32_t)objFn->code.count)
+  {
+    ASSERT(false, "opcode + oprand out of bounds");
     return false;
+  }
 
   int newIndex = wrenSymbolTableEnsure(vm, &vm->methodNames,
     methodNames->data[rebindInfo->nameIndex]->value,
     methodNames->data[rebindInfo->nameIndex]->length);
   if (newIndex >= 0x10000)
   {
-    ASSERT(false, "too many method names");
+    ASSERT(false, "too many method names, max 65535");
     return false;
   }
 
@@ -1081,11 +1182,12 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
 
     uint32_t *length;
     char     *name;
-    while (BufferConsume(buffer, sizeof(uint32_t), (char **)&length)
+    while (!IsBufferExhausted(buffer)
+      && BufferConsume(buffer, sizeof(uint32_t), (char **)&length)
       && BufferConsume(buffer, *length, (char **)&name))
     {
-      wrenSymbolTableEnsure(vm, &methodNames, name, *length);
-      dbgprint("%p, method: %s\n", &buffer->pointer[buffer->consumed], name);
+      int symbol = wrenSymbolTableEnsure(vm, &methodNames, name, *length);
+      dbgprint("    method: %s\n", methodNames.data[symbol]->value);
     }
 
     if (BufferSeek(buffer, dataDir[METHOD_DATA_DIR_REBIND].offset))
@@ -1094,7 +1196,8 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
         dataDir[METHOD_DATA_DIR_REBIND].offset + dataDir[METHOD_DATA_DIR_REBIND].size);
 
       MethodNameRebind *rebindInfo;
-      while (BufferConsume(buffer, sizeof(MethodNameRebind), (char **)&rebindInfo))
+      while (!IsBufferExhausted(buffer)
+        && BufferConsume(buffer, sizeof(MethodNameRebind), (char **)&rebindInfo))
       {
         if (!RebindMethodNames(vm, module, rebindInfo, &methodNames))
         {
@@ -1104,6 +1207,8 @@ bool LoadMethods(Buffer *buffer, WrenVM *vm, ObjModule *module)
       }
     }
   }
+
+  wrenSymbolTableClear(vm, &methodNames);
 
   return ret;
 }
@@ -1136,11 +1241,39 @@ bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
     }
     else
     {
+      ASSERT(false, "bad constant data");
       ret = false;
     }
   } while (ret && !IsBufferExhausted(buffer));
 
   return ret;  
+}
+
+bool IsFnBodyValid(WrenVM *vm, ObjModule *module)
+{
+  bool ret = true;
+
+  uint32_t index = 0;
+  for (Obj *obj = vm->first; obj; obj = obj->next)
+  {
+    if (obj->type != OBJ_FN)
+      continue;
+
+    ObjFn *fn = (ObjFn *)obj;
+    if (fn->module != module)
+      continue;
+
+    if (fn->code.count == 0)
+    {
+      ASSERT(false, "fn body empty");
+      ret = false;
+      break;
+    }
+
+    index++;
+  }
+
+  return ret;
 }
 
 bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
@@ -1153,6 +1286,8 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   }
 
   bool ret = true;
+
+  uint32_t fnIndex = 0;
 
   //create all ObjFn objects first.
   do
@@ -1167,7 +1302,16 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
     {
       ObjFn *fn = wrenNewFunction(vm, module, header->maxSlots);
       if (!fn)
+      {
+        ASSERT(false, "unable to create fn");
         ret = false;
+        break;
+      }
+
+      dbgprint("    created fn %p, index = %u, code count = %u\n",
+        fn, fnIndex, header->dataDir[FN_DATA_DIR_CODE].size);
+
+      fnIndex++;      
     }
   } while (ret && !IsBufferExhausted(indexBuffer));
 
@@ -1177,7 +1321,7 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   BufferRewind(indexBuffer);
   BufferRewind(buffer);
 
-  uint32_t fnIndex = 0;
+  fnIndex = 0;
 
   do
   {
@@ -1216,6 +1360,8 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       ret = LoadConstants(&constantBuffer, vm, module, fn);
 
       wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
+      dbgprint("fn = %u, code count = %u\n", fnIndex, fn->code.count);
+
       if (header->dataDir[FN_DATA_DIR_DEBUG].size)
       {
         wrenIntBufferAppend(vm, &fn->debug->sourceLines, (int *)debug,
@@ -1223,18 +1369,26 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       }
 
       //wrenPopRoot(vm);
+
+      fnIndex++;
     }
     else
     {
+      ASSERT(false, "unexpected fn data");
       ret = false;
     }
   } while (ret && !IsBufferExhausted(indexBuffer));
+
+  if (ret)
+  {
+    ret = IsFnBodyValid(vm, module);
+  }
 
   return ret;
 }
 
 //TODO: disable GC first.
-bool wrenLoadModule(WrenVM *vm, const char *moduleName)
+bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName)
 {
   Value name;
   
@@ -1302,10 +1456,10 @@ bool wrenLoadModule(WrenVM *vm, const char *moduleName)
     && fread(methodNameBuffer.pointer, 1, methodNameBuffer.capacity, f) == methodNameBuffer.capacity
     )
   {
-    variableBuffer.length     = variableBuffer.capacity;
-    fnIndexBuffer.length      = fnIndexBuffer.capacity;
-    fnBuffer.length           = fnBuffer.capacity;
-    methodNameBuffer.length   = methodNameBuffer.capacity;
+    variableBuffer.length     = variableBuffer.consumeLimit   = variableBuffer.capacity;
+    fnIndexBuffer.length      = fnIndexBuffer.consumeLimit    = fnIndexBuffer.capacity;
+    fnBuffer.length           = fnBuffer.consumeLimit         = fnBuffer.capacity;
+    methodNameBuffer.length   = methodNameBuffer.consumeLimit = methodNameBuffer.capacity;
 
     ret = LoadVariables(&variableBuffer, vm, module)
       && LoadFNs(&fnIndexBuffer, &fnBuffer, vm ,module)

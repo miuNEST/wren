@@ -54,4 +54,6 @@ void wrenBindMethodCode(ObjClass* classObj, ObjFn* fn);
 // its parents) so that they are not collected by the GC.
 void wrenMarkCompiler(WrenVM* vm, Compiler* compiler);
 
+int getNumArguments(const uint8_t* bytecode, const Value* constants,
+  int ip);
 #endif

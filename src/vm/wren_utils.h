@@ -26,7 +26,7 @@ typedef struct sObjString ObjString;
                                 int count); \
     void wren##name##BufferWrite(WrenVM* vm, name##Buffer* buffer, type data); \
     void wren##name##BufferAppend(WrenVM* vm, name##Buffer* buffer, type *data, \
-                                uint8_t count)
+                                int count)
 
 // This should be used once for each type instantiation, somewhere in a .c file.
 #define DEFINE_BUFFER(name, type) \
@@ -66,7 +66,7 @@ typedef struct sObjString ObjString;
     } \
     \
     void wren##name##BufferAppend(WrenVM* vm, name##Buffer* buffer, type *data, \
-                                uint8_t count) \
+                                int count) \
     { \
       if (buffer->capacity < buffer->count + count) \
       { \
@@ -76,9 +76,9 @@ typedef struct sObjString ObjString;
         buffer->capacity = capacity; \
       } \
       \
-      for (uint8_t i = 0; i < count; i++) \
+      for (int i = 0; i < count; i++) \
       { \
-        buffer->data[buffer->count++] = *data++; \
+        buffer->data[buffer->count++] = data[i]; \
       } \
     }
 

@@ -221,18 +221,10 @@ typedef enum VM_MODE
   VM_MODE_BYTECODE,   //run *.wrc bytecode file.
 } VM_MODE;
 
-typedef struct MethodNameInfo
-{
-  void                  *objFn;
-  uint32_t               offset;    //offset relative to the start of objFn opcode.
-  struct MethodNameInfo *next;
-} MethodNameInfo;
-
 typedef struct UserData
 {
   int             size;
   VM_MODE         vmMode;
-  MethodNameInfo *methodNameInfo;
 } UserData;
 
 typedef enum
