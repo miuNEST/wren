@@ -216,8 +216,29 @@ static void freeVM()
   uv_tty_reset_mode();
 }
 
+char *getModuleNameWithoutSuffix(const char *name)
+{
+  char *moduleName = strdup(name);
+  if (!moduleName)
+  {
+    ASSERT(false, "out of memory");
+    exit(-1);
+  }
+
+  char * lastDot = strrchr(moduleName, '.');
+  if (lastDot &&
+    (!_stricmp(lastDot, ".wren") || !_stricmp(lastDot, ".wrc")))
+  {
+    *lastDot = '\0';
+  }
+
+  return moduleName;
+}
+
 void runFile(const char* path, VM_MODE vmMode)
 {
+  const char *moduleName;
+
   // Use the directory where the file is as the root to resolve imports
   // relative to.
   char* root = NULL;
@@ -228,23 +249,24 @@ void runFile(const char* path, VM_MODE vmMode)
     memcpy(root, path, lastSlash - path + 1);
     root[lastSlash - path + 1] = '\0';
     rootDirectory = root;
+
+    moduleName = lastSlash + 1;
   }
+  else
+  {
+    moduleName = path;
+  }
+
+  char *name = getModuleNameWithoutSuffix(moduleName);
 
   initVM(vmMode);
 
   char* source = NULL;
-  WrenInterpretResult result;
+  WrenInterpretResult result;    
 
   if (vmMode == VM_MODE_BYTECODE)
   {
-    const char *moduleName;
-    const char* lastSlash = strrchr(path, '/');
-    if (lastSlash)
-      moduleName = lastSlash + 1;
-    else
-      moduleName = path;
-
-    if (wrenLoadCompiledModule(vm, moduleName, true, NULL))
+    if (wrenLoadCompiledModule(vm, name, true, NULL))
       result = WREN_RESULT_SUCCESS;
     else
     {
@@ -254,14 +276,14 @@ void runFile(const char* path, VM_MODE vmMode)
   }
   else
   {
-    char* source = readFile(path);
+    source = readFile(path);
     if (source == NULL)
     {
       fprintf(stderr, "Could not find file \"%s\".\n", path);
       exit(66);
     }
 
-    result = wrenInterpret(vm, source);
+    result = wrenInterpret(vm, name, source);
   }
 
   if (afterLoadFn != NULL) afterLoadFn(vm);
@@ -273,6 +295,7 @@ void runFile(const char* path, VM_MODE vmMode)
 
   freeVM();
 
+  free(name);
   free(source);
   free(root);
 
@@ -290,7 +313,7 @@ int runRepl()
   printf("\\\\/\"-\n");
   printf(" \\_/   wren v%s\n", WREN_VERSION_STRING);
 
-  wrenInterpret(vm, "import \"repl\"\n");
+  wrenInterpret(vm, "main", "import \"repl\"\n");
   
   uv_run(loop, UV_RUN_DEFAULT);
 

@@ -13,7 +13,8 @@
 #endif
 
 #if defined(_DEBUG) || defined(DEBUG)
-#define dbgprint printf
+//#define dbgprint printf
+#define dbgprint
 #else
 #define dbgprint
 #endif
@@ -587,7 +588,7 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
 {
 #if WREN_NAN_TAGGING
   
-  wrenDumpValue(value);
+  //wrenDumpValue(value);
   dbgprint("\n");
 
   if (IS_NUM(value))
@@ -1126,7 +1127,7 @@ static bool RebindMethodNames(WrenVM *vm, ObjModule *module,
 
   if (rebindInfo->offset + sizeof(uint16_t) > (uint32_t)objFn->code.count)
   {
-    ASSERT(false, "opcode + oprand out of bounds");
+    ASSERT(false, "opcode + operand out of bounds");
     return false;
   }
 
@@ -1479,7 +1480,7 @@ bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
   BufferFree(&fnBuffer);
   BufferFree(&methodNameBuffer);
 
-  if (ret)
+  if (ret && name != NULL_VAL)
   {
     // Store it in the VM's module registry so we don't load the same module
     // multiple times.

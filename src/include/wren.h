@@ -270,7 +270,7 @@ void wrenFreeVM(WrenVM* vm);
 void wrenCollectGarbage(WrenVM* vm);
 
 // Runs [source], a string of Wren source code in a new fiber in [vm].
-WrenInterpretResult wrenInterpret(WrenVM* vm, const char* source);
+WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module, const char* source);
 
 // Creates a handle that can be used to invoke a method with [signature] on
 // using a receiver and arguments that are set up on the stack.

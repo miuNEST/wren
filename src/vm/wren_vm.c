@@ -1266,7 +1266,7 @@ WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
         ObjClosure *Objclosure;
         if (!wrenLoadCompiledModule(vm, moduleName, false, &Objclosure))
         {
-          ASSERT(false, "failed to load core module byte code");
+          ASSERT(false, "failed to load module byte code");
           //TODO: Ö´ÐÐÊ§°ÜÁ÷³Ì
           RUNTIME_ERROR();
         }
@@ -1432,9 +1432,9 @@ void wrenReleaseHandle(WrenVM* vm, WrenHandle* handle)
   DEALLOCATE(vm, handle);
 }
 
-WrenInterpretResult wrenInterpret(WrenVM* vm, const char* source)
+WrenInterpretResult wrenInterpret(WrenVM* vm, const char* module, const char* source)
 {
-  return wrenInterpretInModule(vm, "main", source);
+  return wrenInterpretInModule(vm, module, source);
 }
 
 WrenInterpretResult wrenInterpretInModule(WrenVM* vm, const char* module,

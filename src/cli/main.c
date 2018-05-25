@@ -31,11 +31,24 @@ int main(int argc, const char* argv[])
     VM_MODE vmMode = VM_MODE_INTERPRET;
 
     if (strstr(argv[1], ".wrc"))
+    {
       vmMode = VM_MODE_BYTECODE;
-    else if (argc >= 3 && (_stricmp(argv[2], "-c") == 0))
+      runFile(argv[1], vmMode);
+    }
+    else if (argc >= 3 && (_stricmp(argv[1], "-c") == 0))
+    {
       vmMode = VM_MODE_COMPILE;
-
-    runFile(argv[1], vmMode);
+      runFile(argv[2], vmMode);
+    }
+    else if (argc >= 3 && (_stricmp(argv[2], "-c") == 0))
+    {
+      vmMode = VM_MODE_COMPILE;
+      runFile(argv[1], vmMode);
+    }
+    else
+    {
+      runFile(argv[1], vmMode);
+    }    
   }
 
   return 0;
