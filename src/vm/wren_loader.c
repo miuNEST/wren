@@ -287,6 +287,10 @@ void BufferFree(Buffer *buffer)
 
 static bool GetFnMethodNameInfo(ObjFn* fn, Buffer *buffer)
 {
+  //foreign function body is empty
+  if (!fn->code.count || !fn->code.data)
+    return true;
+
   int ip = 0;
 
   for (;;)
@@ -1254,33 +1258,6 @@ bool LoadConstants(Buffer *buffer, WrenVM *vm, ObjModule *module, ObjFn *fn)
   return ret;  
 }
 
-bool IsFnBodyValid(WrenVM *vm, ObjModule *module)
-{
-  bool ret = true;
-
-  uint32_t index = 0;
-  for (Obj *obj = vm->first; obj; obj = obj->next)
-  {
-    if (obj->type != OBJ_FN)
-      continue;
-
-    ObjFn *fn = (ObjFn *)obj;
-    if (fn->module != module)
-      continue;
-
-    if (fn->code.count == 0)
-    {
-      ASSERT(false, "fn body empty");
-      ret = false;
-      break;
-    }
-
-    index++;
-  }
-
-  return ret;
-}
-
 bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   WrenVM *vm, ObjModule *module)
 {
@@ -1342,7 +1319,6 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       && BufferSeek(buffer, dataDir->offset)
       && BufferConsume(buffer, sizeof(FnHeader), (char **)&header)
 
-      && header->dataDir[FN_DATA_DIR_CODE].size != 0
       && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_CODE].offset)
       && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_CODE].size, (char **)&code)
 
@@ -1360,11 +1336,17 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       fn->numUpvalues = header->numUpvalues;
       //TODO: add function name.
 
-      Buffer constantBuffer;
-      BufferSet(&constantBuffer, constants, header->dataDir[FN_DATA_DIR_CONSTANTS].size);
-      ret = LoadConstants(&constantBuffer, vm, module, fn);
+      if (header->dataDir[FN_DATA_DIR_CONSTANTS].size)
+      {
+        Buffer constantBuffer;
+        BufferSet(&constantBuffer, constants, header->dataDir[FN_DATA_DIR_CONSTANTS].size);
+        ret = LoadConstants(&constantBuffer, vm, module, fn);
+      }
 
-      wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
+      if (header->dataDir[FN_DATA_DIR_CODE].size)
+      {
+        wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
+      }
       dbgprint("fn = %u, code count = %u\n", fnIndex, fn->code.count);
 
       if (header->dataDir[FN_DATA_DIR_DEBUG].size)
@@ -1383,11 +1365,6 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       ret = false;
     }
   } while (ret && !IsBufferExhausted(indexBuffer));
-
-  if (ret)
-  {
-    ret = IsFnBodyValid(vm, module);
-  }
 
   return ret;
 }

@@ -218,7 +218,7 @@ static void freeVM()
 
 char *getModuleNameWithoutSuffix(const char *name)
 {
-  char *moduleName = strdup(name);
+  char *moduleName = _strdup(name);
   if (!moduleName)
   {
     ASSERT(false, "out of memory");
