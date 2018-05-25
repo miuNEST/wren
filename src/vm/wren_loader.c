@@ -817,7 +817,7 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
       break;
     }
 
-    if (!fn->debug->name || !strcmp(fn->debug->name, "(script)"))
+    if (fn->debug->name && !strcmp(fn->debug->name, "(script)"))
     {
       ASSERT(*entryFnIndex == (uint32_t)-1, "too many block entry fn");
       *entryFnIndex = fnIndex;

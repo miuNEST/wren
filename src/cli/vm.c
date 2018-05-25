@@ -284,6 +284,7 @@ void runFile(const char* path, VM_MODE vmMode)
     }
 
     result = wrenInterpret(vm, name, source);
+    ASSERT(result == WREN_RESULT_SUCCESS, "failed to interpret file");
   }
 
   if (afterLoadFn != NULL) afterLoadFn(vm);
