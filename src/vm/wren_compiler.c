@@ -3339,28 +3339,28 @@ static void import(Compiler* compiler)
   if (userData->vmMode == VM_MODE_COMPILE)
   {
     Value valClosure = wrenImportModule(compiler->parser->vm, compiler->parser->previous.value);
-    if (valClosure != NULL_VAL)
-    {
-      WrenVM *vm = compiler->parser->vm;
-      wrenPushRoot(vm, (Obj *)valClosure);
-      ObjFiber* fiber = wrenNewFiber(vm, AS_CLOSURE(valClosure));
-      wrenPopRoot(vm);
+    //if (valClosure != NULL_VAL)
+    //{
+    //  WrenVM *vm = compiler->parser->vm;
+    //  wrenPushRoot(vm, (Obj *)valClosure);
+    //  ObjFiber* fiber = wrenNewFiber(vm, AS_CLOSURE(valClosure));
+    //  wrenPopRoot(vm);
 
-      if (!fiber)
-      {
-        ASSERT(false, "no memory to create fiber");
-        compiler->parser->hasError = true;
-        return;
-      }
+    //  if (!fiber)
+    //  {
+    //    ASSERT(false, "no memory to create fiber");
+    //    compiler->parser->hasError = true;
+    //    return;
+    //  }
 
-      WrenInterpretResult result = runInterpreter(vm, fiber);
-      if (result != WREN_RESULT_SUCCESS)
-      {
-        ASSERT(false, "unable to execute module body fn");
-        compiler->parser->hasError = true;
-        return;
-      }
-    }
+    //  WrenInterpretResult result = runInterpreter(vm, fiber);
+    //  if (result != WREN_RESULT_SUCCESS)
+    //  {
+    //    ASSERT(false, "unable to execute module body fn");
+    //    compiler->parser->hasError = true;
+    //    return;
+    //  }
+    //}
   }
 
   int moduleConstant = addConstant(compiler, compiler->parser->previous.value);

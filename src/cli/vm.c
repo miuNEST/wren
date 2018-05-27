@@ -283,8 +283,16 @@ void runFile(const char* path, VM_MODE vmMode)
       exit(66);
     }
 
-    result = wrenInterpret(vm, name, source);
-    ASSERT(result == WREN_RESULT_SUCCESS, "failed to interpret file");
+    if (vmMode == VM_MODE_COMPILE)
+    {
+      ObjClosure* closure = wrenCompileSource(vm, name, source, false, true);
+      result = (closure == NULL) ? WREN_RESULT_COMPILE_ERROR : WREN_RESULT_SUCCESS;
+    }
+    else
+    {
+      result = wrenInterpret(vm, name, source);
+      ASSERT(result == WREN_RESULT_SUCCESS, "failed to interpret file");
+    }
   }
 
   if (afterLoadFn != NULL) afterLoadFn(vm);

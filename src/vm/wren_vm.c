@@ -775,7 +775,14 @@ WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
   register ObjFn* fn;
 
   // These macros are designed to only be invoked within this function.
-  #define PUSH(value)  (*fiber->stackTop++ = value)
+#define STACK_COUNT(f) ((f)->stackTop - (f)->stack)
+
+#define PUSH(value) if (STACK_COUNT(fiber) >= fiber->stackCapacity) \
+  { \
+    wrenEnsureStack(vm, fiber, fiber->stackCapacity + 1); \
+  } \
+  *fiber->stackTop++ = value
+
   #define POP()        (*(--fiber->stackTop))
   #define DROP()       (fiber->stackTop--)
   #define PEEK()       (*(fiber->stackTop - 1))
@@ -850,7 +857,8 @@ WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
         switch (instruction = (Code)READ_BYTE())
 
   #define CASE_CODE(name)  case CODE_##name
-  #define DISPATCH()       goto loop
+  #define DISPATCH() ASSERT((int)STACK_COUNT(fiber) <= fiber->stackCapacity, "stack overflow"); \
+    goto loop
 
   #endif
 
