@@ -13,8 +13,8 @@
 #endif
 
 #if defined(_DEBUG) || defined(DEBUG)
-//#define dbgprint printf
-#define dbgprint
+#define dbgprint printf
+//#define dbgprint
 #else
 #define dbgprint
 #endif
@@ -85,7 +85,6 @@ enum FN_DATA_DIRECTORY
 
 typedef struct FnHeader
 {
-  uint32_t nameIndex;
   uint32_t maxSlots;
   uint32_t numUpvalues;
   uint32_t arity;
@@ -592,7 +591,7 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
 {
 #if WREN_NAN_TAGGING
   
-  //wrenDumpValue(value);
+  wrenDumpValue(value);
   dbgprint("\n");
 
   if (IS_NUM(value))
@@ -782,7 +781,6 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
     header.maxSlots    = fn->maxSlots;
     header.numUpvalues = fn->numUpvalues;
     header.arity       = fn->arity;
-    //TODO: header.nameIndex
 
     uint32_t offset = sizeof(header);
 
@@ -794,8 +792,12 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
     header.dataDir[FN_DATA_DIR_CONSTANTS].offset = offset;
     offset += header.dataDir[FN_DATA_DIR_CONSTANTS].size;
 
-    uint16_t numDebugBytes = fn->debug->sourceLines.count
-                              * sizeof(fn->debug->sourceLines.data[0]);
+    uint32_t nameLength = fn->debug->name ? strlen(fn->debug->name) : 0;
+
+    uint32_t numDebugBytes = nameLength;
+    numDebugBytes += fn->debug->sourceLines.count
+                      * sizeof(fn->debug->sourceLines.data[0]);
+
     header.dataDir[FN_DATA_DIR_DEBUG].size   = numDebugBytes;
     header.dataDir[FN_DATA_DIR_DEBUG].offset = offset;
 
@@ -804,8 +806,9 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
     ret = BufferAppend(buffer, (const char *)&header, sizeof(header))
       && BufferAppend(buffer, fn->code.data, fn->code.count)
       && BufferAppend(buffer, constantBuffer.pointer, constantBuffer.length)
-      && BufferAppend(buffer, (const char *)fn->debug->sourceLines.data,
-        numDebugBytes);
+      && BufferAppend(buffer, (const char *)&nameLength, sizeof(uint32_t))
+      && BufferAppend(buffer, fn->debug->name, nameLength)
+      && BufferAppend(buffer, (const char *)fn->debug->sourceLines.data, numDebugBytes);
     BufferFree(&constantBuffer);
     if (!ret)
     {
@@ -1313,6 +1316,8 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
     char          *constants;
     char          *debug;
     ObjFn         *fn;
+    uint32_t      *fnNameLen;
+    char          *fnName;
 
     if (BufferConsume(indexBuffer, sizeof(DataDirectory), (char **)&dataDir)
 
@@ -1326,6 +1331,8 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_CONSTANTS].size, (char **)&constants)
 
       && BufferSeek(buffer, dataDir->offset + header->dataDir[FN_DATA_DIR_DEBUG].offset)
+      && BufferConsume(buffer, sizeof(uint32_t), (char **)&fnNameLen)
+      && BufferConsume(buffer, *fnNameLen, (char **)&fnName)
       && BufferConsume(buffer, header->dataDir[FN_DATA_DIR_DEBUG].size, (char **)&debug)
 
       && (fn = GetObjFn(vm, module, fnIndex)) != NULL
@@ -1334,7 +1341,6 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       //wrenPushRoot(vm, (Obj *)fn);
       fn->arity       = header->arity;
       fn->numUpvalues = header->numUpvalues;
-      //TODO: add function name.
 
       if (header->dataDir[FN_DATA_DIR_CONSTANTS].size)
       {
@@ -1347,13 +1353,19 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       {
         wrenByteBufferAppend(vm, &fn->code, code, header->dataDir[FN_DATA_DIR_CODE].size);
       }
-      dbgprint("fn = %u, code count = %u\n", fnIndex, fn->code.count);
+      
+      if (*fnNameLen)
+        wrenFunctionBindName(vm, fn, fnName, (int)(*fnNameLen));
 
       if (header->dataDir[FN_DATA_DIR_DEBUG].size)
       {
         wrenIntBufferAppend(vm, &fn->debug->sourceLines, (int *)debug,
           header->dataDir[FN_DATA_DIR_DEBUG].size / sizeof(int));
       }
+
+      dbgprint("fn = %u (%s), code count = %u\n", fnIndex,
+        fn->debug->name ? fn->debug->name : "noname",
+        fn->code.count);
 
       //wrenPopRoot(vm);
 
