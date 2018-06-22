@@ -542,16 +542,22 @@ void Trim(char* str)
 string run_wren_vm_when_activating_smart_contract(string input_source_code,string initargu)//首次激活合约时调用的接口函数 
 {
   //add for test
-    WrenVM* vm;
+
+    UserData userData;
+    userData.size = sizeof(userData);
+    userData.vmMode = VM_MODE_INTERPRET;
+    
     WrenConfiguration config;
     wrenInitConfiguration(&config);
     config.bindForeignMethodFn = bindForeignMethod_selfDef;
-    config.writeFn = write;
-    config.errorFn = reportError;
-    config.initialHeapSize = 1024 * 1024 * 10;
-    config.loadModuleFn = readModule;
-    vm = wrenNewVM(&config);
-  //
+    config.writeFn             = write;
+    config.errorFn             = reportError;
+    config.initialHeapSize     = 1024 * 1024 * 10;
+    config.loadModuleFn        = readModule;
+    config.userData            = &userData;
+
+    WrenVM *vm = wrenNewVM(&config);
+
      string temp = input_source_code;
      int fclass1 =temp.find("class ");
      int fclass2 =temp.find("is",fclass1+6);
@@ -587,7 +593,8 @@ string run_wren_vm_when_activating_smart_contract(string input_source_code,strin
      output = state;
      cout<<"output = "<<output<<endl;
      return output; 
-}  
+}
+
 string run_wren_vm_when_invoking_smart_contract(string input_source_code, string contranct_method_and_parameter, string starting_state)//激活之后，合约每次被调用时，需要调用该函数
 {
   //add for test
