@@ -1,4 +1,4 @@
-﻿# file(GLOB headers "include/graphene/wren/*.hpp" "include/graphene/wren/*.h")
+# file(GLOB headers "include/graphene/wren/*.hpp" "include/graphene/wren/*.h")
 
 aux_source_directory(./src/vm SRC_VM)
 aux_source_directory(./src/include SRC_INCLUDE)
