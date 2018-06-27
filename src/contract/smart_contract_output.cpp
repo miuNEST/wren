@@ -334,7 +334,7 @@ WrenForeignMethodFn bindForeignMethod_selfDef(WrenVM* vm, const char* module,
 
 }
 
-static char const* rootDirectory = NULL;
+extern const char * rootDirectory;
 
 static char* readFile(const char* path)
 {

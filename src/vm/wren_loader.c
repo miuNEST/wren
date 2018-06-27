@@ -19,6 +19,10 @@
 #define dbgprint
 #endif
 
+#ifndef WIN32
+    #define _stricmp strcasecmp
+#endif
+
 #pragma pack(push, 1)
 
 typedef struct TLV
