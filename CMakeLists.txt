@@ -1,4 +1,16 @@
-# file(GLOB headers "include/graphene/wren/*.hpp" "include/graphene/wren/*.h")
+macro(use_c99)
+  if (CMAKE_VERSION VERSION_LESS "3.1")
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+      set (CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
+    endif ()
+  else ()
+	if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    	set (CMAKE_C_STANDARD 99)
+	endif ()
+  endif ()
+endmacro(use_c99)
+
+use_c99()
 
 aux_source_directory(./src/vm SRC_VM)
 aux_source_directory(./src/include SRC_INCLUDE)
