@@ -380,7 +380,7 @@ typedef struct
   Scope scope;
 } Variable;
 
-const char *rootDirectory = NULL;
+char *rootDirectory = NULL;
 
 // The stack effect of each opcode. The index in the array is the opcode, and
 // the value is the stack effect of that instruction.

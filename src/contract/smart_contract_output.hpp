@@ -27,7 +27,7 @@ using namespace std;
 int smart_contract_output( );
 //int smart_contract_output(double &d1)//, double &d2, double &d3);
 string run_wren_vm_when_activating_smart_contract(string input_source_code,string initargu);//首次激活合约时调用的接口函数 
-string run_wren_vm_when_invoking_smart_contract(string input_source_code, string contranct_method, string input_data);//激活之后，合约每次被调用时，需要调用该函数
+string InvokeSmartContract(string input_source_code, string contranct_method, string input_data);//激活之后，合约每次被调用时，需要调用该函数
 void Trim(char* str);
 
 

@@ -149,7 +149,7 @@ typedef struct MethodNameInfo
   uint32_t               offset;    //offset relative to the start of objFn opcode.
 } MethodNameInfo;
 
-extern const char *rootDirectory;
+extern char *rootDirectory;
 
 bool SaveValueToBuffer(WrenVM *vm, ObjModule *module, Value value, Buffer *buffer);
 uint32_t GetFnIndex(WrenVM *vm, ObjModule *module, ObjFn *fnTarget);

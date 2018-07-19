@@ -225,6 +225,7 @@ typedef struct UserData
 {
   int             size;
   VM_MODE         vmMode;
+  void           *db;
 } UserData;
 
 typedef enum
@@ -463,6 +464,6 @@ void* wrenGetUserData(WrenVM* vm);
 // Sets user data associated with the WrenVM.
 void wrenSetUserData(WrenVM* vm, void* userData);
 
-extern const char *rootDirectory;
+extern char *rootDirectory;
 
 #endif

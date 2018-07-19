@@ -1,7 +1,431 @@
 #include "./smart_contract_output.hpp"
-#include "../include/wren.h"
 #include "../include/wren.hpp"
+#include <fc/exception/exception.hpp>
+#include <graphene/chain/account_evaluator.hpp>
+#include <graphene/chain/database.hpp>
+#include <cctype>
 
+using namespace graphene::chain;
+
+const string asset_symbol = "BTS";
+
+template<class T>
+optional<T> maybe_id(const string& name_or_id)
+{
+    if (std::isdigit(name_or_id.front()))
+    {
+        try
+        {
+            return fc::variant(name_or_id, 1).as<T>(1);
+        }
+        catch (const fc::exception&)
+        { // not an ID
+        }
+    }
+    return optional<T>();
+}
+
+vector<optional<account_object>> get_accounts(database *db, const vector<account_id_type>& account_ids)
+{
+    vector<optional<account_object>> result; result.reserve(account_ids.size());
+    std::transform(account_ids.begin(), account_ids.end(), std::back_inserter(result),
+        [&](account_id_type id) -> optional<account_object> {
+        if (auto o = db->find(id))
+        {
+            //subscribe_to_item(id);
+            return *o;
+        }
+        return{};
+    });
+
+    return result;
+}
+
+vector<optional<account_object>> lookup_account_names(database *db, const vector<string>& account_names)
+{
+    const auto& accounts_by_name = db->get_index_type<account_index>().indices().get<by_name>();
+    vector<optional<account_object> > result;
+    result.reserve(account_names.size());
+    std::transform(account_names.begin(), account_names.end(), std::back_inserter(result),
+        [&accounts_by_name](const string& name) -> optional<account_object> {
+        auto itr = accounts_by_name.find(name);
+        return itr == accounts_by_name.end() ? optional<account_object>() : *itr;
+    });
+
+    return result;
+}
+
+account_object get_account(database *db, account_id_type id)
+{
+    auto rec = get_accounts(db, { id }).front();
+    FC_ASSERT(rec);
+    return *rec;
+}
+account_object get_account(database *db, string account_name_or_id)
+{
+    FC_ASSERT(account_name_or_id.size() > 0);
+
+    if (auto id = maybe_id<account_id_type>(account_name_or_id))
+    {
+        // It's an ID
+        return get_account(db, *id);
+    }
+    else {
+        auto rec = lookup_account_names(db, { account_name_or_id }).front();
+        FC_ASSERT(rec && rec->name == account_name_or_id);
+        return *rec;
+    }
+}
+
+account_id_type get_account_id(database *db, string account_name_or_id)
+{
+    return get_account(db, account_name_or_id).get_id();
+}
+
+vector<optional<asset_object>> lookup_asset_symbols(database *db, const vector<string>& symbols_or_ids)
+{
+    const auto& assets_by_symbol = db->get_index_type<asset_index>().indices().get<by_symbol>();
+    vector<optional<asset_object> > result;
+    result.reserve(symbols_or_ids.size());
+    std::transform(symbols_or_ids.begin(), symbols_or_ids.end(), std::back_inserter(result),
+        [&db, &assets_by_symbol](const string& symbol_or_id) -> optional<asset_object> {
+        if (!symbol_or_id.empty() && std::isdigit(symbol_or_id[0]))
+        {
+            auto ptr = db->find(variant(symbol_or_id, 1).as<asset_id_type>(1));
+            return ptr == nullptr ? optional<asset_object>() : *ptr;
+        }
+        auto itr = assets_by_symbol.find(symbol_or_id);
+        return itr == assets_by_symbol.end() ? optional<asset_object>() : *itr;
+    });
+    return result;
+}
+
+vector<optional<asset_object>> get_assets(database *db, const vector<asset_id_type>& asset_ids)
+{
+    vector<optional<asset_object>> result; result.reserve(asset_ids.size());
+    std::transform(asset_ids.begin(), asset_ids.end(), std::back_inserter(result),
+        [&](asset_id_type id) -> optional<asset_object> {
+        if (auto o = db->find(id))
+        {
+            //subscribe_to_item(id);
+            return *o;
+        }
+        return{};
+    });
+
+    return result;
+}
+
+optional<asset_object> find_asset(database *db, asset_id_type id)
+{
+    auto rec = get_assets(db, { id }).front();
+    if (rec)
+    {
+        //_asset_cache[id] = *rec;
+    }
+    return rec;
+}
+
+optional<asset_object> find_asset(database *db, string asset_symbol_or_id)
+{
+    FC_ASSERT(asset_symbol_or_id.size() > 0);
+
+    if (auto id = maybe_id<asset_id_type>(asset_symbol_or_id))
+    {
+        // It's an ID
+        return find_asset(db, *id);
+    }
+    else {
+        // It's a symbol
+        auto rec = lookup_asset_symbols(db, { asset_symbol_or_id }).front();
+        if (rec)
+        {
+            if (rec->symbol != asset_symbol_or_id)
+                return optional<asset_object>();
+
+            //_asset_cache[rec->get_id()] = *rec;
+        }
+        return rec;
+    }
+}
+
+asset_object get_asset(database *db, asset_id_type id)
+{
+    auto opt = find_asset(db, id);
+    FC_ASSERT(opt);
+    return *opt;
+}
+
+asset_object get_asset(database *db, string asset_symbol_or_id)
+{
+    auto opt = find_asset(db, asset_symbol_or_id);
+    FC_ASSERT(opt);
+    return *opt;
+}
+
+asset_id_type get_asset_id(database *db, string asset_symbol_or_id)
+{
+    FC_ASSERT(asset_symbol_or_id.size() > 0);
+    vector<optional<asset_object>> opt_asset;
+    if (std::isdigit(asset_symbol_or_id.front()))
+        return fc::variant(asset_symbol_or_id, 1).as<asset_id_type>(1);
+    opt_asset = lookup_asset_symbols(db, { asset_symbol_or_id });
+    FC_ASSERT((opt_asset.size() > 0) && (opt_asset[0].valid()));
+    return opt_asset[0]->id;
+}
+
+//fc::ecc::private_key  get_private_key(const public_key_type& id)
+//{
+//    auto it = _keys.find(id);
+//    FC_ASSERT(it != _keys.end());
+//
+//    fc::optional< fc::ecc::private_key > privkey = wif_to_key(it->second);
+//    FC_ASSERT(privkey);
+//    return *privkey;
+//}
+
+void set_operation_fees(signed_transaction& tx, const fee_schedule& s)
+{
+    for (auto& op : tx.operations)
+        s.set_fee(op);
+}
+
+//signed_transaction sign_transaction(database *db, signed_transaction tx, bool broadcast = false)
+//{
+//    set<public_key_type> pks = db->get_potential_signatures(tx);
+//    flat_set<public_key_type> owned_keys;
+//    owned_keys.reserve(pks.size());
+//    std::copy_if(pks.begin(), pks.end(), std::inserter(owned_keys, owned_keys.end()),
+//        [&](const public_key_type& pk){ return _keys.find(pk) != _keys.end(); });
+//    set<public_key_type> approving_key_set = db->get_required_signatures(tx, owned_keys);
+//
+//    auto dyn_props = get_dynamic_global_properties();
+//    tx.set_reference_block(dyn_props.head_block_id);
+//
+//    // first, some bookkeeping, expire old items from _recently_generated_transactions
+//    // since transactions include the head block id, we just need the index for keeping transactions unique
+//    // when there are multiple transactions in the same block.  choose a time period that should be at
+//    // least one block long, even in the worst case.  2 minutes ought to be plenty.
+//    fc::time_point_sec oldest_transaction_ids_to_track(dyn_props.time - fc::minutes(2));
+//    auto oldest_transaction_record_iter = _recently_generated_transactions.get<timestamp_index>().lower_bound(oldest_transaction_ids_to_track);
+//    auto begin_iter = _recently_generated_transactions.get<timestamp_index>().begin();
+//    _recently_generated_transactions.get<timestamp_index>().erase(begin_iter, oldest_transaction_record_iter);
+//
+//    uint32_t expiration_time_offset = 0;
+//    for (;;)
+//    {
+//        tx.set_expiration(dyn_props.time + fc::seconds(30 + expiration_time_offset));
+//        tx.signatures.clear();
+//
+//        for (const public_key_type& key : approving_key_set)
+//            tx.sign(get_private_key(key), _chain_id);
+//
+//        graphene::chain::transaction_id_type this_transaction_id = tx.id();
+//        auto iter = _recently_generated_transactions.find(this_transaction_id);
+//        if (iter == _recently_generated_transactions.end())
+//        {
+//            // we haven't generated this transaction before, the usual case
+//            recently_generated_transaction_record this_transaction_record;
+//            this_transaction_record.generation_time = dyn_props.time;
+//            this_transaction_record.transaction_id = this_transaction_id;
+//            _recently_generated_transactions.insert(this_transaction_record);
+//            break;
+//        }
+//
+//        // else we've generated a dupe, increment expiration time and re-sign it
+//        ++expiration_time_offset;
+//    }
+//
+//    if (broadcast)
+//    {
+//        try
+//        {
+//            _remote_net_broadcast->broadcast_transaction(tx);
+//        }
+//        catch (const fc::exception& e)
+//        {
+//            elog("Caught exception while broadcasting tx ${id}:  ${e}", ("id", tx.id().str())("e", e.to_detail_string()));
+//            throw;
+//        }
+//    }
+//
+//    return tx;
+//}
+//
+//signed_transaction transfer(database *db, string from, string to, string amount,
+//    string asset_symbol, string memo, bool broadcast = false)
+//{
+//    try
+//    {
+//        fc::optional<asset_object> asset_obj = get_asset(db, asset_symbol);
+//        FC_ASSERT(asset_obj, "Could not find asset matching ${asset}", ("asset", asset_symbol));
+//
+//        account_object from_account = get_account(db, from);
+//        account_object to_account = get_account(db, to);
+//        account_id_type from_id = from_account.id;
+//        account_id_type to_id = get_account_id(db, to);
+//
+//        transfer_operation xfer_op;
+//
+//        xfer_op.from = from_id;
+//        xfer_op.to = to_id;
+//        xfer_op.amount = asset_obj->amount_from_string(amount);
+//
+//        //TODO: get private key from wallet
+//
+//        //if (memo.size())
+//        //{
+//        //    xfer_op.memo = memo_data();
+//        //    xfer_op.memo->from = from_account.options.memo_key;
+//        //    xfer_op.memo->to = to_account.options.memo_key;
+//        //    xfer_op.memo->set_message(get_private_key(from_account.options.memo_key),
+//        //        to_account.options.memo_key, memo);
+//        //}
+//
+//        signed_transaction tx;
+//        tx.operations.push_back(xfer_op);
+//        set_operation_fees(tx, db->get_global_properties().parameters.current_fees);
+//        tx.validate();
+//
+//        return sign_transaction(tx, broadcast);
+//    } FC_CAPTURE_AND_RETHROW((from)(to)(amount)(asset_symbol)(memo)(broadcast))
+//}
+//
+
+void safeMathAdd(WrenVM *vm)
+{
+    uint64_t a = (uint64_t)wrenGetSlotDouble(vm, 1);
+    uint64_t b = (uint64_t)wrenGetSlotDouble(vm, 2);
+    uint64_t c = a + b;
+    FC_ASSERT(c >= a);
+    wrenSetSlotDouble(vm, 0, (double)c);
+}
+
+void safeMathSub(WrenVM *vm)
+{
+    uint64_t a = (uint64_t)wrenGetSlotDouble(vm, 1);
+    uint64_t b = (uint64_t)wrenGetSlotDouble(vm, 2);
+    FC_ASSERT(a >= b);
+
+    wrenSetSlotDouble(vm, 0, (float)(a - b));
+}
+
+void safeMathMul(WrenVM *vm)
+{
+    uint64_t a = (uint64_t)wrenGetSlotDouble(vm, 1);
+    uint64_t b = (uint64_t)wrenGetSlotDouble(vm, 2);
+    uint64_t c = a * b;
+    FC_ASSERT(a == 0 || (c / a) == b);
+    wrenSetSlotDouble(vm, 0, (float)c);
+}
+
+void safeMathDiv(WrenVM *vm)
+{
+    uint64_t a = (uint64_t)wrenGetSlotDouble(vm, 1);
+    uint64_t b = (uint64_t)wrenGetSlotDouble(vm, 2);
+    FC_ASSERT(b != 0);
+    wrenSetSlotDouble(vm, 0, (float)(a / b));
+}
+
+void getBalance(WrenVM *vm)
+{
+    const char *userId = wrenGetSlotString(vm, 1);
+
+    UserData *userData = (UserData *)(vm->config.userData);
+    database *db = (database *)userData->db;
+
+    fc::optional<asset_object> asset_obj = get_asset(db, asset_symbol);
+    FC_ASSERT(asset_obj, "Could not find asset matching ${asset}", ("asset", asset_symbol));
+
+    account_object account = get_account(db, userId);
+    asset userAsset = db->get_balance(account.get_id(), asset_obj->get_id());
+
+    ilog("balance getter: ${b} ${a}", ("b", userAsset.amount.value)("a", asset_symbol));
+
+    wrenSetSlotDouble(vm, 0, (float)(userAsset.amount.value));
+}
+
+void adjustBalance(WrenVM *vm)
+{
+    const char *userId = wrenGetSlotString(vm, 1);
+    int64_t delta      = (uint64_t)wrenGetSlotDouble(vm, 2);
+
+    UserData *userData = (UserData *)(vm->config.userData);
+    database *db = (database *)userData->db;
+
+    fc::optional<asset_object> asset_obj = get_asset(db, asset_symbol);
+    FC_ASSERT(asset_obj, "Could not find asset matching ${asset}", ("asset", asset_symbol));
+
+    account_object account = get_account(db, userId);
+    //asset userAsset = db->get_balance(account.get_id(), asset_obj->get_id());
+
+    asset deltaAsset;
+    deltaAsset.amount = delta;
+    deltaAsset.asset_id = asset_obj->get_id();
+    db->adjust_balance(account.get_id(), deltaAsset);
+
+    ilog("adjust balance: ${u}, ${d} ${a}", ("u", userId)("d", delta)("a", asset_symbol));
+}
+
+void getAllowed(WrenVM* vm)
+{
+    const char *tokenOwner = wrenGetSlotString(vm, 1);
+    const char *spender = wrenGetSlotString(vm, 2);
+
+    //TODO: get allowed withdraw from db
+    wrenSetSlotDouble(vm, 0, (float)500000);
+}
+
+void adjustAllowed(WrenVM* vm)
+{
+    const char *tokenOwner = wrenGetSlotString(vm, 1);
+    const char *spender = wrenGetSlotString(vm, 2);
+    int64_t delta = (int64_t)wrenGetSlotDouble(vm, 3);
+
+    //TODO: save allowed withdraw to db
+}
+
+void eventTransfer(WrenVM* vm)
+{
+    const char *from = wrenGetSlotString(vm, 1);
+    const char *to   = wrenGetSlotString(vm, 2);
+    uint64_t tokens  = (uint64_t)wrenGetSlotString(vm, 3);
+
+    //TODO: save allowed withdraw to db
+}
+
+static WrenForeignMethodFn bindContractForeignMethod(WrenVM* vm, const char* module,
+    const char* className, bool isStatic, const char* signature)
+{
+    if (!strcmp(className, "SafeMath") && isStatic)
+    {
+        if (!strcmp(signature, "add(_,_)"))
+            return safeMathAdd;
+        else if (!strcmp(signature, "sub(_,_)"))
+            return safeMathSub;
+        else if (!strcmp(signature, "mul(_,_)"))
+            return safeMathMul;
+        else if (!strcmp(signature, "div(_,_)"))
+            return safeMathDiv;
+    }
+    else if (!strcmp(className, "Contract") && isStatic)
+    {
+        if (!strcmp(signature, "getBalance(_)"))
+            return getBalance;
+        else if (!strcmp(signature, "adjustBalance(_,_)"))
+            return adjustBalance;
+        if (!strcmp(signature, "getAllowed(_,_)"))
+            return getAllowed;
+        else if (!strcmp(signature, "adjustAllowed(_,_,_)"))
+            return adjustAllowed;
+        else if (!strcmp(signature, "eventTransfer(_,_,_)"))
+            return eventTransfer;
+    }
+
+    FC_ASSERT(false);
+
+    return NULL;
+}
 
 static WrenHandle* handleObj;
 
@@ -334,7 +758,7 @@ WrenForeignMethodFn bindForeignMethod_selfDef(WrenVM* vm, const char* module,
 
 }
 
-extern const char * rootDirectory;
+extern char * rootDirectory;
 
 static char* readFile(const char* path)
 {
@@ -424,96 +848,12 @@ WrenVM* vm1;
 
 int smart_contract_output()
 {
-    WrenConfiguration config;
-    wrenInitConfiguration(&config);
-    
-//  config.bindForeignClassFn = bindForeignClass_selfDef;
-    config.bindForeignMethodFn = bindForeignMethod_selfDef;
-    config.writeFn = write;
-    config.errorFn = reportError;
-    config.initialHeapSize = 1024 * 1024 * 10;
-    config.loadModuleFn = readModule;
-
-    vm1 = wrenNewVM(&config);
-
-    
-  
-//  printf("%p\n", vm);
-/*====================================
-    FILE* fp;
-    char* data;
-    fp = fopen("abc.wren","r");
-    if(fp == NULL)
-    {
-        perror("Open file recfile");
-        exit(1);
-    }
-    fseek(fp,0,SEEK_END);
-    int length = ftell(fp);
-    data = (char *)malloc((length + 1) * sizeof(char));
-    rewind(fp);
-    length = fread(data, 1, length, fp);
-    data[length] = '\0';
-
-    WrenInterpretResult result = wrenInterpret(vm, data);
-
- //   printf("result: %d\n", result);
-    fclose(fp);
-    free(data);
-//*/ //====================================
-/*====================================
-    FILE* fp1;
-    char* data1;
-    fp1 = fopen("b001.wren","r");
-    if(fp1 == NULL)
-    {
-        perror("Open file recfile");classname
-        exit(1);
-    }
-    fseek(fp1,0,SEEK_END);
-    int length1 = ftell(fp1);
-    data1 = (char *)malloc((length1 + 1) * sizeof(char));
-    rewind(fp1);
-    length1 = fread(data1, 1, length1, fp1);
-    data1[length1] = '\0';
-    printf("B smartcontract is called\n");
-
-    WrenInterpretResult result1 = wrenInterpret(vm, data1);
-
-    printf("result1: %d\n", result1);
-    fclose(fp1);
-    free(data1);
-//*/ //====================================
-  
-    //string a ="123";
-    //  char * b =(char *)a.c_str();
-    //  cout<< b <<endl;  
-    // return 0;
-    
-    //test 
-    string demo = "class A is Contract {  \n"
-    "construct new(lis) {     //must be lists \n"
-    "    _p1 = lis[0] \n"
-    "    _p2 = lis[1]\n"
-    "    _p3 = lis[2]\n"
-    "}\n"
-    "member_variables{[_p1, _p2, _p3]} //must be assign  \n"
-    "member1_add(p) {_p1 = _p1 + p} \n"
-    "member2_add(p) {_p2 = _p2 + p} \n"
-    "member3_add(p) {_p3 = _p3 + p} \n"
-    "add(a,b){       \n"
-    "    return a+b   \n"
-    "}    \n"
-   "}";
-   string state = "100,false,\"bob\"";
-   string out =run_wren_vm_when_activating_smart_contract(demo,state);
-   string method ="member1_add(20)";
-   out =run_wren_vm_when_invoking_smart_contract(demo, method, "");
+    //string method ="member1_add(20)";
+    //string out = InvokeSmartContract("", method, "");
    
-   wrenFreeVM(vm1);
+    //wrenFreeVM(vm1);
     
     return 0;
-
 }
 
 void Trim(char* str) 
@@ -595,53 +935,41 @@ string run_wren_vm_when_activating_smart_contract(string input_source_code,strin
      return output; 
 }
 
-string run_wren_vm_when_invoking_smart_contract(string input_source_code, string contranct_method_and_parameter, string starting_state)//激活之后，合约每次被调用时，需要调用该函数
+string smart_contract_call_evaluator::invoke_smart_contract(string input_source_code,
+    string contranct_method_and_parameter,
+    string starting_state)
 {
-  //add for test
-    WrenVM* vm;
+    UserData userData;
+    userData.size   = sizeof(userData);
+    userData.vmMode = VM_MODE_INTERPRET;
+    userData.db     = &db();
+
     WrenConfiguration config;
     wrenInitConfiguration(&config);
-    config.bindForeignMethodFn = bindForeignMethod_selfDef;
-    config.writeFn = write;
-    config.errorFn = reportError;
-    config.initialHeapSize = 1024 * 1024 * 10;
-    config.loadModuleFn = readModule;
-    vm = wrenNewVM(&config);
-  //
-  string temp = input_source_code;
-  int fclass1 =temp.find("class ");
-  int fclass2 =temp.find("is",fclass1+6);
-  string classname = temp.substr(fclass1+6,fclass2-fclass1-6);
-  int fconstruct1 =temp.find("construct ");
-  int fconstruct2 =temp.find("(",fconstruct1+10);
-  string constructname =temp.substr(fconstruct1+10,fconstruct2-fconstruct1-10);
-  Trim((char *)classname.c_str());
-  Trim((char *)constructname.c_str());
-  string init = (char *)classname.c_str();
- // init +="."+constructname+"(Contract.reassemble_state())\n";
-  init +="."+constructname+"("+starting_state+")\n";
-  string code_pre ="import \"contract\" for Contract\n";
-  code_pre += input_source_code;
-  code_pre += "\nvar obj1 =";
-  code_pre += init;
-  code_pre += "obj1.";
-  code_pre += contranct_method_and_parameter;
-  code_pre += "\nobj1.save_member_variables_into_c()\n";
-  char* data=(char *)code_pre.c_str();
-  cout<< "data = " << data <<endl;
-  cout<<"starting_state "<<starting_state<<endl;
-  WrenInterpretResult result = wrenInterpret(vm, "main", data);
-  wrenFreeVM(vm);
-  string output ;
-  if(result != 0)
-  {
-      if(result==1)
-          output="error:WREN_RESULT_COMPILE_ERROR";
-      else
-          output="error:WREN_RESULT_RUNTIME_ERROR";
-      return output;
-  }
-  output = state;
-  return output;  
+    config.bindForeignMethodFn = bindContractForeignMethod;
+    config.writeFn             = write;
+    config.errorFn             = reportError;
+    config.initialHeapSize     = 1024 * 1024 * 10;
+    config.loadModuleFn        = readModule;
+    config.userData            = &userData;
 
+    WrenVM *vm = wrenNewVM(&config);
+
+    if (userData.vmMode == VM_MODE_INTERPRET)
+    {        
+        std::string sourceCode;
+        sourceCode += input_source_code;
+        sourceCode += "\nERC20Simple.transfer(\"1.2.17\", \"1.2.18\", 1)\n";
+        WrenInterpretResult result = wrenInterpret(vm, "main", sourceCode.c_str());
+    }
+    else
+    {
+        //TODO: run byte code through ABI-based function call, and get ret value of function call.
+        FC_ASSERT(false);
+    }
+
+    wrenFreeVM(vm);
+
+    //TODO: get ret value of function call.
+    return "";
 }
