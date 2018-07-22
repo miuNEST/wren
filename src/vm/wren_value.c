@@ -637,6 +637,31 @@ Value wrenMapRemoveKey(WrenVM* vm, ObjMap* map, Value key)
   return value;
 }
 
+bool wrenIsBuiltInModule(const ObjString *name)
+{
+  if (!name || !name->value)
+    return true;
+
+  static const char *builtinName[] = 
+  {
+    "meta",
+    "os",
+    "io",
+    "repl",
+    "timer",
+    "Scheduler",
+    "random"
+  };
+
+  for (size_t k = 0; k < sizeof(builtinName) / sizeof(builtinName[0]); k++)
+  {
+    if (!strcmp(builtinName[k], name->value))
+      return true;
+  }
+
+  return false;
+}
+
 ObjModule* wrenNewModule(WrenVM* vm, ObjString* name)
 {
   ObjModule* module = ALLOCATE(vm, ObjModule);
@@ -650,6 +675,7 @@ ObjModule* wrenNewModule(WrenVM* vm, ObjString* name)
   wrenValueBufferInit(&module->variables);
 
   module->name = name;
+  module->isBuiltIn = wrenIsBuiltInModule(name);
 
   wrenPopRoot(vm);
   return module;

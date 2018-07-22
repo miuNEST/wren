@@ -232,6 +232,9 @@ typedef struct
 
   // The name of the module.
   ObjString* name;
+
+  //is built-in module
+  bool isBuiltIn;
 } ObjModule;
 
 // A function object. It wraps and owns the bytecode and other debug information
@@ -263,6 +266,14 @@ typedef struct
   // only be set for fns, and not ObjFns that represent methods or scripts.
   int arity;
   FnDebug* debug;
+
+  bool       isMethod;
+  bool       isStatic;
+  bool       isConstructor;
+  bool       isForeign;  
+  ObjString *signature;
+  uint32_t   id;
+  uint8_t    methodArity;
 } ObjFn;
 
 // An instance of a first-class function and the environment it has closed over.

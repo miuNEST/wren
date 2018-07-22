@@ -3082,7 +3082,7 @@ void statement(Compiler* compiler)
 //     CODE_CALL      - Invoke the initializer on the new instance.
 //
 // This creates that method and calls the initializer with [initializerSymbol].
-static void createConstructor(Compiler* compiler, Signature* signature,
+static ObjFn * createConstructor(Compiler* compiler, Signature* signature,
                               int initializerSymbol)
 {
   Compiler methodCompiler;
@@ -3099,7 +3099,7 @@ static void createConstructor(Compiler* compiler, Signature* signature,
   // Return the instance.
   emitOp(&methodCompiler, CODE_RETURN);
   
-  endCompiler(&methodCompiler, "", 0);
+  return endCompiler(&methodCompiler, "", 0);
 }
 
 // Loads the enclosing class onto the stack and then binds the function already
@@ -3206,7 +3206,17 @@ static bool method(Compiler* compiler, Variable classVariable)
   {
     consume(compiler, TOKEN_LEFT_BRACE, "Expect '{' to begin method body.");
     finishBody(&methodCompiler, signature.type == SIG_INITIALIZER);
-    endCompiler(&methodCompiler, fullSignature, length);
+    ObjFn *fn = endCompiler(&methodCompiler, fullSignature, length);
+    if (fn && fn->module && !fn->module->isBuiltIn && signature.type != SIG_INITIALIZER)
+    {
+      fn->isMethod       = true;
+      fn->isConstructor  = false;
+      fn->isForeign      = false;
+      fn->isStatic       = isStatic;
+      fn->signature      = wrenNewStringLength(compiler->parser->vm, fullSignature, length);
+      fn->id             = wrenGetMethodID(fullSignature, length);
+      fn->methodArity    = signature.arity;
+    }
   }
   
   // Define the method. For a constructor, this defines the instance
@@ -3219,7 +3229,21 @@ static bool method(Compiler* compiler, Variable classVariable)
     signature.type = SIG_METHOD;
     int constructorSymbol = signatureSymbol(compiler, &signature);
     
-    createConstructor(compiler, &signature, methodSymbol);
+    ObjFn *fn = createConstructor(compiler, &signature, methodSymbol);
+    if (fn && fn->module && !fn->module->isBuiltIn)
+    {
+      //TODO: add ref of sigString to avoid GC.
+      ObjString *sigString = compiler->parser->vm->methodNames.data[constructorSymbol];
+
+      fn->isMethod       = true;
+      fn->isConstructor  = true;
+      fn->isForeign      = isForeign;
+      fn->isStatic       = isStatic;
+      fn->signature      = wrenNewStringLength(compiler->parser->vm, sigString->value, sigString->length);
+      fn->id             = wrenGetMethodID(sigString->value, sigString->length);
+      fn->methodArity    = signature.arity;
+    }
+
     defineMethod(compiler, classVariable, true, constructorSymbol);
   }
 
@@ -3610,4 +3634,11 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
     compiler = compiler->parent;
   }
   while (compiler != NULL);
+}
+
+uint64_t wrenGetMethodID(const char *signature, size_t length)
+{
+  unsigned char hash[32];
+  FIPS202_SHA3_256((const unsigned char *)signature, (unsigned int)length, hash);
+  return *((uint64_t *)hash);
 }

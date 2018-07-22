@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "wren_value.h"
 #include "wren_debug.h"
+#include "../cjson/cJSON.h"
 
 #define WREN_FILE_MAGIC       'NERW'
 #define WREN_BYTECODDE_MAJOR  1
@@ -1514,6 +1515,97 @@ bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
       return true;
     }
   }
+
+  return ret;
+}
+
+bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
+{
+  cJSON *jsonRoot = cJSON_CreateArray();
+  if (!jsonRoot)
+    return false;
+
+  bool ret = true;
+
+  for (Obj *obj = vm->first; obj; obj = obj->next)
+  {
+    if (obj->type != OBJ_FN)
+      continue;
+
+    ObjFn *fn = (ObjFn *)obj;
+    if (!fn->module->name
+      || fn->module->isBuiltIn
+      || strcmp(fn->module->name->value, module->name->value)
+      || fn->isForeign                 //TODO: foreign method of class
+      || !fn->isMethod)
+    {
+      continue;
+    }
+
+    cJSON *jsonMethod = cJSON_CreateObject();
+    if (!jsonMethod)
+    {
+      ret = false;
+      break;
+    }
+
+    cJSON_AddItemToArray(jsonRoot, jsonMethod);
+
+    //char stringValue[32];
+    //sprintf(stringValue, "%u", fn->id);
+    //if (!cJSON_AddStringToObject(jsonMethod, "selector", stringValue))
+    if (!cJSON_AddNumberToObject(jsonMethod, "selector", fn->id))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddStringToObject(jsonMethod, "sig", fn->signature->value))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddBoolToObject(jsonMethod, "ctor", fn->isConstructor))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddBoolToObject(jsonMethod, "static", fn->isStatic))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddNumberToObject(jsonMethod, "input", fn->methodArity))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddNumberToObject(jsonMethod, "output", 1))
+    {
+      ret = false;
+      break;
+    }
+  }
+
+  if (ret)
+  {
+#ifdef _DEBUG
+    char *jsonString = cJSON_Print(jsonRoot);
+#else
+    char *jsonString = cJSON_PrintUnformatted(jsonRoot);
+#endif
+    if (jsonString)
+    {
+      printf("%s\n", jsonString);
+      free(jsonString);
+    }
+  }
+
+  cJSON_Delete(jsonRoot);
 
   return ret;
 }

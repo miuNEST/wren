@@ -513,6 +513,9 @@ static ObjClosure* compileInModule(WrenVM* vm, Value name, const char* source,
   UserData *userData = (UserData *)vm->config.userData;
   if (userData->vmMode == VM_MODE_COMPILE)
   {
+    if (!module->isBuiltIn)
+      wrenGenerateABI(vm, module);
+
     wrenSaveCompiledModule(vm, module);
   }
 
