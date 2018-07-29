@@ -1271,7 +1271,7 @@ WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber)
       Value name = fn->constants.data[READ_SHORT()];
 
       UserData *userData = (UserData *)vm->config.userData;
-      if (userData->vmMode == VM_MODE_BYTECODE)
+      if (userData->vmMode == VM_MODE_BYTECODE && !wrenIsBuiltInModule(name))
       {
         char *moduleName = AS_STRING(name)->value;
         ObjClosure *Objclosure;

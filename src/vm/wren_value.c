@@ -644,6 +644,7 @@ bool wrenIsBuiltInModule(const ObjString *name)
 
   static const char *builtinName[] = 
   {
+    "core",
     "meta",
     "os",
     "io",

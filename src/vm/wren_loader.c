@@ -14,13 +14,13 @@
 #endif
 
 #if defined(_DEBUG) || defined(DEBUG)
-#define dbgprint printf
-//#define dbgprint
+//#define dbgprint printf
+#define dbgprint
 #else
 #define dbgprint
 #endif
 
-#ifndef WIN32
+#ifndef _WIN32
     #define _stricmp strcasecmp
 #endif
 
@@ -93,7 +93,7 @@ typedef struct FnHeader
   uint32_t maxSlots;
   uint32_t numUpvalues;
   uint32_t arity;
-
+  uint32_t id;
   DataDirectory dataDir[3];
 } FnHeader;
 
@@ -262,13 +262,15 @@ void BufferSetLimit(Buffer *buffer, uint32_t limit)
   buffer->consumeLimit = limit;
 }
 
-void BufferSet(Buffer *buffer, char *data, uint32_t length)
+bool BufferSet(Buffer *buffer, char *data, uint32_t length)
 {
   buffer->pointer      = data;
   buffer->length       = length;
   buffer->capacity     = length;
   buffer->consumed     = 0;
   buffer->consumeLimit = length;
+
+  return true;
 }
 
 bool IsBufferExhausted(const Buffer *buffer)
@@ -596,7 +598,7 @@ bool SaveValueToBuffer(WrenVM *vm, ObjModule *module,
 {
 #if WREN_NAN_TAGGING
   
-  wrenDumpValue(value);
+  //wrenDumpValue(value);
   dbgprint("\n");
 
   if (IS_NUM(value))
@@ -786,6 +788,7 @@ static bool SaveModuleFnToBuffer(WrenVM *vm, ObjModule *module,
     header.maxSlots    = fn->maxSlots;
     header.numUpvalues = fn->numUpvalues;
     header.arity       = fn->arity;
+    header.id          = fn->abi.id;
 
     uint32_t offset = sizeof(header);
 
@@ -1346,6 +1349,7 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
       //wrenPushRoot(vm, (Obj *)fn);
       fn->arity       = header->arity;
       fn->numUpvalues = header->numUpvalues;
+      fn->abi.id      = header->id;
 
       if (header->dataDir[FN_DATA_DIR_CONSTANTS].size)
       {
@@ -1386,9 +1390,41 @@ bool LoadFNs(Buffer *indexBuffer, Buffer *buffer,
   return ret;
 }
 
+bool wrenLoadCompiledModule(WrenVM      *vm,
+                            const char  *moduleName,
+                            bool         runClosure,
+                            ObjClosure **objClosure)
+{
+  char *fileName = NULL;
+  FILE *f        = NULL;
+  char *bytecode = NULL;
+  int   fileLen;
+  
+  bool ret = false;
+
+  if ((fileName = GetModuleFilePath(moduleName)) != NULL
+    && (f = fopen(fileName, "rb")) != NULL
+    && fseek(f, 0, SEEK_END) == 0
+    && (fileLen = ftell(f)) > 0
+    && (bytecode = (char *)malloc(fileLen)) != NULL
+    && fseek(f, 0, SEEK_SET) == 0
+    && fread(bytecode, 1, fileLen, f) == fileLen)
+  {
+    ret = wrenLoadCompiledModuleFromBuffer(vm, moduleName, bytecode, fileLen, true, objClosure);
+  }
+  
+  if (bytecode) free(bytecode);
+  if (f)        fclose(f);
+  if (fileName) free(fileName);  
+
+  return ret;
+}
+
 //TODO: disable GC first.
-bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
-  bool runClosure, ObjClosure **objClosure)
+bool wrenLoadCompiledModule2(WrenVM      *vm,
+                             const char  *moduleName,
+                             bool         runClosure,
+                             ObjClosure **objClosure)
 {
   Value name;
   
@@ -1519,6 +1555,126 @@ bool wrenLoadCompiledModule(WrenVM *vm, const char *moduleName,
   return ret;
 }
 
+//TODO: deal with GC.
+bool wrenLoadCompiledModuleFromBuffer(WrenVM        *vm,
+                                      const char    *moduleName,
+                                      const uint8_t *bytecode,
+                                      const uint32_t bytecodeLen,
+                                      bool           runClosure,
+                                      ObjClosure   **objClosure)
+{
+  Value name;
+
+  if (_stricmp(moduleName, CORE_MODULE_NAME))
+    name = wrenNewString(vm, moduleName);
+  else
+    name = NULL_VAL;
+
+  ObjModule* module = getModule(vm, name);
+  if (module && name != NULL_VAL)
+    return true;
+
+  if (name != NULL_VAL)
+  {
+    wrenPushRoot(vm, AS_OBJ(name));
+    module = wrenNewModule(vm, AS_STRING(name));
+    wrenPushRoot(vm, (Obj *)module);
+
+    // Implicitly import the core module.
+    ObjModule* coreModule = getModule(vm, NULL_VAL);
+    for (int i = 0; i < coreModule->variables.count; i++)
+    {
+      wrenDefineVariable(vm, module,
+        coreModule->variableNames.data[i]->value,
+        coreModule->variableNames.data[i]->length,
+        coreModule->variables.data[i]);
+    }
+  }
+
+  bool ret = false;
+
+  Buffer bytecodeBuffer;
+  Buffer methodNameBuffer;
+  Buffer variableBuffer;
+  Buffer fnBuffer;
+  Buffer fnIndexBuffer;
+  
+  BufferSet(&bytecodeBuffer, (char *)bytecode, bytecodeLen);
+  
+  ModuleFileHeader *header;
+  char             *data;
+
+  if (BufferConsume(&bytecodeBuffer, sizeof(header), (char **)&header)
+    && IsValidModuleHeader(header)
+
+    && BufferSeek(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_VARIABLE].offset)
+    && BufferConsume(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_VARIABLE].size, (char **)&data)
+    && BufferSet(&variableBuffer, data, header->dataDir[MODULE_DATA_DIR_VARIABLE].size)
+
+    && BufferSeek(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_FN_INDEX].offset)
+    && BufferConsume(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_FN_INDEX].size, (char **)&data)
+    && BufferSet(&fnIndexBuffer, data, header->dataDir[MODULE_DATA_DIR_FN_INDEX].size)
+
+    && BufferSeek(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_FN].offset)
+    && BufferConsume(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_FN].size, (char **)&data)
+    && BufferSet(&fnBuffer, data, header->dataDir[MODULE_DATA_DIR_FN].size)
+
+    && BufferSeek(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_METHOD].offset)
+    && BufferConsume(&bytecodeBuffer, header->dataDir[MODULE_DATA_DIR_METHOD].size, (char **)&data)
+    && BufferSet(&methodNameBuffer, data, header->dataDir[MODULE_DATA_DIR_METHOD].size)
+    )
+  {
+    ret = LoadVariables(&variableBuffer, vm, module)
+      && LoadFNs(&fnIndexBuffer, &fnBuffer, vm, module)
+      && LoadMethods(&methodNameBuffer, vm, module);
+  }
+
+  if (ret && name != NULL_VAL)
+  {
+    // Store it in the VM's module registry so we don't load the same module
+    // multiple times.
+    wrenMapSet(vm, vm->modules, name, OBJ_VAL(module));
+  }
+
+  if (name != NULL_VAL)
+  {
+    wrenPopRoot(vm); //module
+    wrenPopRoot(vm); //name
+  }
+
+  if (ret)
+  {
+    ObjClosure *closure;
+    ObjFn      *entryFn;
+    if (!(entryFn = GetObjFn(vm, module, header->entryFnIndex))
+      || !(closure = wrenNewClosure(vm, entryFn))
+      )
+    {
+      return false;
+    }
+
+    if (runClosure)
+    {
+      wrenPushRoot(vm, (Obj *)closure);
+      ObjFiber* fiber = wrenNewFiber(vm, closure);
+      wrenPopRoot(vm);
+
+      if (!fiber)
+        return false;
+
+      return runInterpreter(vm, fiber) == WREN_RESULT_SUCCESS;
+    }
+    else
+    {
+      *objClosure = closure;
+      return true;
+    }
+  }
+
+  return ret;
+
+}
+
 bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
 {
   cJSON *jsonRoot = cJSON_CreateArray();
@@ -1533,11 +1689,12 @@ bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
       continue;
 
     ObjFn *fn = (ObjFn *)obj;
+    MethodAbiInfo *abi = &fn->abi;
     if (!fn->module->name
       || fn->module->isBuiltIn
       || strcmp(fn->module->name->value, module->name->value)
-      || fn->isForeign                 //TODO: foreign method of class
-      || !fn->isMethod)
+      || abi->isForeign                 //TODO: foreign method of class
+      || !abi->isMethod)
     {
       continue;
     }
@@ -1551,34 +1708,37 @@ bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
 
     cJSON_AddItemToArray(jsonRoot, jsonMethod);
 
-    //char stringValue[32];
-    //sprintf(stringValue, "%u", fn->id);
-    //if (!cJSON_AddStringToObject(jsonMethod, "selector", stringValue))
-    if (!cJSON_AddNumberToObject(jsonMethod, "selector", fn->id))
+    if (!cJSON_AddNumberToObject(jsonMethod, "selector", abi->id))
     {
       ret = false;
       break;
     }
 
-    if (!cJSON_AddStringToObject(jsonMethod, "sig", fn->signature->value))
+    if (!cJSON_AddStringToObject(jsonMethod, "sig", abi->signature))
     {
       ret = false;
       break;
     }
 
-    if (!cJSON_AddBoolToObject(jsonMethod, "ctor", fn->isConstructor))
+    if (!cJSON_AddStringToObject(jsonMethod, "class", abi->className))
     {
       ret = false;
       break;
     }
 
-    if (!cJSON_AddBoolToObject(jsonMethod, "static", fn->isStatic))
+    if (!cJSON_AddBoolToObject(jsonMethod, "ctor", abi->isConstructor))
     {
       ret = false;
       break;
     }
 
-    if (!cJSON_AddNumberToObject(jsonMethod, "input", fn->methodArity))
+    if (!cJSON_AddBoolToObject(jsonMethod, "static", abi->isStatic))
+    {
+      ret = false;
+      break;
+    }
+
+    if (!cJSON_AddNumberToObject(jsonMethod, "input", abi->methodArity))
     {
       ret = false;
       break;
@@ -1593,11 +1753,7 @@ bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
 
   if (ret)
   {
-#ifdef _DEBUG
-    char *jsonString = cJSON_Print(jsonRoot);
-#else
     char *jsonString = cJSON_PrintUnformatted(jsonRoot);
-#endif
     if (jsonString)
     {
       printf("%s\n", jsonString);
@@ -1606,6 +1762,610 @@ bool wrenGenerateABI(WrenVM *vm, ObjModule *module)
   }
 
   cJSON_Delete(jsonRoot);
+
+  return ret;
+}
+
+MethodAbiInfo *wrenParseAbiString(const char *abiJson, uint32_t *count)
+{
+  MethodAbiInfo *abi      = NULL;
+  cJSON         *jsonRoot = NULL;
+
+  bool ret = true;
+  
+  do
+  {
+    jsonRoot = cJSON_Parse(abiJson);
+    if (!jsonRoot)
+    {
+      ret = false;
+      break;
+    }
+
+    *count = cJSON_GetArraySize(jsonRoot);
+    if (*count == 0)
+    {
+      ret = false;
+      break;
+    }
+
+    abi = (MethodAbiInfo *)malloc(*count * sizeof(MethodAbiInfo));
+    if (!abi)
+    {
+      ret = false;
+      break;
+    }
+
+    for (uint32_t i = 0; i < *count; i++)
+    {
+      cJSON * subitem = cJSON_GetArrayItem(jsonRoot, i);
+
+      cJSON *jsonObj;
+      jsonObj = cJSON_GetObjectItem(subitem, "selector");
+      if (!jsonObj || jsonObj->type != cJSON_Number)
+      {
+        ret = false;
+        break;
+      }
+      abi[i].id = (uint32_t)jsonObj->valuedouble;
+
+      jsonObj = cJSON_GetObjectItem(subitem, "sig");
+      if (!jsonObj || jsonObj->type != cJSON_String)
+      {
+        ret = false;
+        break;
+      }
+      memset(abi[i].signature, 0, sizeof(abi[i].signature));
+      memcpy(abi[i].signature, jsonObj->valuestring, min(strlen(jsonObj->valuestring), sizeof(abi[i].signature) - 1));
+
+      jsonObj = cJSON_GetObjectItem(subitem, "class");
+      if (!jsonObj || jsonObj->type != cJSON_String)
+      {
+        ret = false;
+        break;
+      }
+      memset(abi[i].className, 0, sizeof(abi[i].className));
+      memcpy(abi[i].className, jsonObj->valuestring, min(strlen(jsonObj->valuestring), sizeof(abi[i].className) - 1));
+
+
+      jsonObj = cJSON_GetObjectItem(subitem, "ctor");
+      if (!jsonObj || (jsonObj->type != cJSON_True && jsonObj->type != cJSON_False))
+      {
+        ret = false;
+        break;
+      }
+      abi[i].isConstructor = (jsonObj->type == cJSON_True);
+
+      jsonObj = cJSON_GetObjectItem(subitem, "static");
+      if (!jsonObj || (jsonObj->type != cJSON_True && jsonObj->type != cJSON_False))
+      {
+        ret = false;
+        break;
+      }
+      abi[i].isStatic = (jsonObj->type == cJSON_True);
+
+      jsonObj = cJSON_GetObjectItem(subitem, "input");
+      if (!jsonObj || jsonObj->type != cJSON_Number)
+      {
+        ret = false;
+        break;
+      }
+      abi[i].methodArity = jsonObj->valueint;
+
+      jsonObj = cJSON_GetObjectItem(subitem, "output");
+      if (!jsonObj || jsonObj->type != cJSON_Number)
+      {
+        ret = false;
+        break;
+      }
+    }
+  } while (false);
+
+  if (jsonRoot)
+    cJSON_Delete(jsonRoot);
+
+  if (ret)
+    return abi;
+
+  if (abi)
+    free(abi);
+  
+  return NULL;
+}
+
+typedef enum ArgType
+{
+  ArgType_Integer,
+  ArgType_String,
+  ArgType_Bool,
+} ArgType;
+
+typedef struct ArgInfo
+{
+  ArgType type;
+
+  union
+  {
+    int64_t     valueInt64;
+    char       *valueString;
+    uint8_t     valueBool;
+  } value;
+} ArgInfo;
+
+typedef struct CallInfo
+{
+  uint32_t     methodId;
+  uint32_t     numArgs;
+  ArgInfo     *args;
+} CallInfo;
+
+inline bool hexCharToBin(char ch, uint8_t *bin)
+{
+  if (ch >= '0' && ch <= '9')
+  {
+    *bin = ch - '0';
+    return true;
+  }
+  else if (ch >= 'a' && ch <= 'f')
+  {
+    *bin = ch - 'a' + 0xa;
+    return true;
+  }
+  else if (ch >= 'A' && ch <= 'F')
+  {
+    *bin = ch - 'A' + 0xA;
+    return true;
+  }
+
+  return false;
+}
+
+uint8_t *hexStringToBin(const char *callData, uint32_t *binLength)
+{
+  size_t len = strlen(callData);
+  if (len == 0 || (len & 1))
+    return NULL;
+
+  *binLength = len >> 1;
+  uint8_t *buffer = (uint8_t *)malloc(*binLength);
+  if (!buffer)
+    return NULL;
+
+  bool ret = true;
+
+  uint32_t j = 0;
+  for (size_t k = 0; k < len; k += 2)
+  {
+    if (! hexCharToBin(callData[k], &buffer[j]))
+    {
+      ret = false;
+      break;
+    }    
+
+    uint8_t temp;
+    if (!hexCharToBin(callData[k + 1], &temp))
+    {
+      ret = false;
+      break;
+    }
+
+    buffer[j] <<= 4;
+    buffer[j] |= temp;
+    j++;
+  }
+
+  if (ret)
+    return buffer;
+
+  free(buffer);
+  return NULL;
+}
+
+void wrenFreeCallInfo(CallInfo *callInfo)
+{
+  if (callInfo)
+  {
+    if (callInfo->args)
+    {
+      for (uint32_t k = 0; k < callInfo->numArgs; k++)
+      {
+        if (callInfo->args[k].type == ArgType_String
+          && callInfo->args[k].value.valueString)
+        {
+          free(callInfo->args[k].value.valueString);
+        }
+      }
+
+      free(callInfo->args);
+    }
+
+    free(callInfo);
+  }
+}
+
+CallInfo *wrenParseCallData(const char *callData)
+{
+  CallInfo *callInfo = NULL;
+  uint8_t  *binData = NULL;
+  uint32_t numArgs = 0;
+
+  bool ret = true;
+
+  do 
+  {
+    uint32_t binLen;
+    binData = hexStringToBin(callData, &binLen);
+    if (!binData)
+    {
+      ret = false;
+      break;
+    }
+
+    callInfo = (CallInfo *)malloc(sizeof(CallInfo));
+    if (!callInfo)
+    {
+      ret = false;
+      break;
+    }
+    callInfo->args = NULL;
+
+    Buffer buffer;
+    BufferSet(&buffer, binData, binLen);
+
+    uint32_t *methodId;
+    if (!BufferConsume(&buffer, sizeof(uint32_t), (char **)&methodId))
+    {
+      ret = false;
+      break;
+    } 
+    callInfo->methodId = *methodId;
+
+    callInfo->numArgs = 0;
+
+    for(;;)
+    {
+      if (IsBufferExhausted(&buffer))
+        break;
+
+      uint8_t  *type;
+      uint16_t *length;
+      uint8_t  *value;
+
+      if (!BufferConsume(&buffer, sizeof(uint8_t), (char **)&type))
+      {
+        ret = false;
+        break;
+      }
+
+      if (!BufferConsume(&buffer, sizeof(uint16_t), (char **)&length))
+      {
+        ret = false;
+        break;
+      }
+
+      if (!BufferConsume(&buffer, *length, (char **)&value))
+      {
+        ret = false;
+        break;
+      }
+
+      callInfo->numArgs++;
+      ArgInfo *newArgs = (ArgInfo *)realloc(callInfo->args, sizeof(ArgInfo) * callInfo->numArgs);
+      if (!newArgs)
+      {
+        ret = false;
+        callInfo->numArgs--;
+        break;
+      }
+
+      callInfo->args = newArgs;
+      ArgInfo *currentArg = &newArgs[callInfo->numArgs - 1];
+      currentArg->type = ArgType_String;
+      currentArg->value.valueString = NULL;
+
+      switch (*type)
+      {
+        case FN_CONST_TYPE_FALSE:
+          ASSERT(*length == 1, "bad false length");
+          ASSERT(*value == 0, "bad false value");
+          currentArg->type            = ArgType_Bool;
+          currentArg->value.valueBool = 0;
+          break;
+
+        case FN_CONST_TYPE_TRUE:
+          ASSERT(*length == 1, "bad true length");
+          ASSERT(*value == 1, "bad true value");
+          currentArg->type = ArgType_Bool;
+          currentArg->value.valueBool = 1;
+          break;
+
+        case FN_CONST_TYPE_NUM:
+          if (*length != sizeof(int64_t))
+          {
+            ret = false;
+            break;
+          }
+          currentArg->type = ArgType_Integer;
+          currentArg->value.valueInt64 = *((int64_t *)value);
+          break;
+
+        case FN_CONST_TYPE_STRING:
+          currentArg->type = ArgType_String;
+          currentArg->value.valueString = (char *)malloc(*length + 1);
+          if (!currentArg->value.valueString)
+          {
+            ret = false;
+            break;
+          }
+          memcpy(currentArg->value.valueString, value, *length);
+          currentArg->value.valueString[*length] = '\0';
+          break;
+
+        default:
+          ASSERT(false, "not supported type yet");
+          ret = false;
+          break;
+      }
+
+      if (!ret)
+        break;
+    }
+  } while (false);
+
+  if (binData)
+    free(binData);
+
+  if (ret)
+    return callInfo;
+
+  wrenFreeCallInfo(callInfo);
+  return NULL;
+}
+
+ObjClass * wrenGetClassObj(WrenVM *vm, const char *className)
+{
+  for (Obj *obj = vm->first; obj; obj = obj->next)
+  {
+    if (obj->type != OBJ_CLASS)
+      continue;
+
+    ObjClass *classObj = (ObjClass *)obj;
+    if (!_stricmp(className, classObj->name->value))
+      return classObj;
+  }
+
+  ASSERT(false, "ObjClass not found!");
+  return NULL;
+}
+
+ObjFn * wrenGetMethodFn(WrenVM *vm, uint32_t methodId)
+{
+  for (Obj *obj = vm->first; obj; obj = obj->next)
+  {
+    if (obj->type != OBJ_FN)
+      continue;
+
+    ObjFn *fn = (ObjFn *)obj;
+    if (fn->abi.id == methodId)
+      return fn;
+  }
+
+  ASSERT(false, "ObjFn not found!");
+  return NULL;
+}
+
+const MethodAbiInfo *wrenGetMethodAbi(uint32_t methodId, const MethodAbiInfo *abi, uint32_t methodCount)
+{
+  for (uint32_t k = 0; k < methodCount; k++)
+  {
+    if (methodId == abi[k].id)
+      return &abi[k];
+  }
+
+  ASSERT(false, "method abi not found!");
+  return NULL;
+}
+
+int wrenGetMethodSymbol(WrenVM *vm, const char *methodName)
+{
+  int existing = wrenSymbolTableFind(&vm->methodNames, methodName, strlen(methodName));
+  ASSERT(existing != -1, "method name not loaded");
+  return existing;
+}
+
+void emitByte(WrenVM *vm, ObjFn *fn, uint8_t byteValue)
+{
+  wrenByteBufferAppend(vm, &fn->code, &byteValue, 1);
+}
+
+void emitShort(WrenVM *vm, ObjFn *fn, uint16_t shortValue)
+{
+  uint8_t *byteValue = (uint8_t *)&shortValue;
+  wrenByteBufferAppend(vm, &fn->code, &byteValue[1], 1);
+  wrenByteBufferAppend(vm, &fn->code, &byteValue[0], 1);
+}
+
+bool wrenCallMethod(WrenVM        *vm,
+                    const uint8_t *bytecode,
+                    const uint32_t bytecodeLen,
+                    const char    *callData,
+                    const char    *abiJson,
+                    const char    *contractHash)
+{
+  MethodAbiInfo *abi = NULL;
+  CallInfo *callInfo = NULL;
+
+  bool ret = true;
+
+  do 
+  {
+    uint32_t methodCount;
+    abi = wrenParseAbiString(abiJson, &methodCount);
+    if (! abi)
+    {
+      ret = false;
+      break;
+    }
+
+    callInfo = wrenParseCallData(callData);
+    if (!callInfo)
+    {
+      ret = false;
+      break;
+    }
+
+    //use smart contract hash string as Wren module name.
+    const char *moduleName = contractHash;
+
+    ObjClosure *moduleClosure;
+    if (!wrenLoadCompiledModuleFromBuffer(vm, moduleName, bytecode, bytecodeLen, true, &moduleClosure))
+    {
+      ret = false;
+      break;
+    }
+
+    ObjFn *calleeFn = wrenGetMethodFn(vm, callInfo->methodId);
+    if (!calleeFn)
+    {
+      ret = false;
+      break;
+    }
+
+    const MethodAbiInfo *methodAbi = wrenGetMethodAbi(callInfo->methodId, abi, methodCount);
+    if (!methodAbi)
+    {
+      ret = false;
+      break;
+    }
+
+    //TODO: deal with variadic args
+    if (methodAbi->methodArity != callInfo->numArgs)
+    {
+      ret = false;
+      break;
+    }
+
+    ObjClass *classObj = wrenGetClassObj(vm, methodAbi->className);
+    if (!classObj)
+    {
+      ret = false;
+      break;
+    }
+
+    Value name = wrenNewString(vm, moduleName);
+    ObjModule* module = getModule(vm, name);
+    if (!module)
+    {
+      ret = false;
+      break;
+    }
+
+    ObjFn *callerFn  = wrenNewFunction(vm, module, 8);
+
+    static const char fnName[] = "fn_smart_contract_call_thunk";
+
+    wrenPushRoot(vm, (Obj *)callerFn);
+    callerFn->debug = ALLOCATE(vm, FnDebug);
+    callerFn->debug->name = ALLOCATE_ARRAY(vm, char, sizeof(fnName));
+    memcpy(callerFn->debug->name, fnName, sizeof(fnName));
+    wrenIntBufferInit(&callerFn->debug->sourceLines);
+    wrenPopRoot(vm);
+
+    ObjClosure *callerClosure = wrenNewClosure(vm, callerFn);
+
+    wrenPushRoot(vm, (Obj *)callerClosure);
+    ObjFiber* fiber = wrenNewFiber(vm, callerClosure);
+    wrenPopRoot(vm);
+    
+    int methodSymbol = wrenGetMethodSymbol(vm, methodAbi->signature);
+    if (methodSymbol == -1)
+    {
+      ret = false;
+      break;
+    }
+
+    #define STACK_COUNT(f) ((f)->stackTop - (f)->stack)
+
+    #define PUSH(value) if (STACK_COUNT(fiber) >= fiber->stackCapacity) \
+      { \
+        wrenEnsureStack(vm, fiber, fiber->stackCapacity + 1); \
+      } \
+      *fiber->stackTop++ = value
+
+    /*
+      TODO:
+
+      1. for constructor call, save member variables to chain database after construction.
+      2. for non-constructor call, load member variables from chain database first,
+         save member variables to chain database after call.
+    */
+    if (methodAbi->isStatic || methodAbi->isConstructor)
+    {      
+      //generate code to call specified member function.
+      emitByte(vm,  callerFn, CODE_CALL_0 + callInfo->numArgs);
+      emitShort(vm, callerFn, methodSymbol);
+      emitByte(vm,  callerFn, CODE_RETURN);
+
+      wrenIntBufferFill(vm, &callerFn->debug->sourceLines, 0, 4);
+
+      PUSH(wrenObjectToValue((Obj *)classObj));
+      for (uint32_t k = 0; k < callInfo->numArgs && ret; k++)
+      {
+        ArgInfo *arg = &callInfo->args[k];
+        switch (arg->type)
+        {
+          case ArgType_Bool:
+            if (arg->value.valueBool)
+            {
+              PUSH(TRUE_VAL);
+            }
+            else
+            {
+              PUSH(FALSE_VAL);
+            }
+            break;
+
+          case ArgType_Integer:
+            PUSH(wrenNumToValue((double)arg->value.valueInt64));
+            break;
+
+          case ArgType_String:
+            PUSH(wrenNewString(vm, arg->value.valueString));
+            break;
+
+          default:
+            ret = false;
+            break;
+        }
+      }
+    }
+    else
+    {
+      //TODO: for non-static method call, construct class instance first.
+
+      ASSERT(false, "not implemented yet");
+      ret = false;
+    }
+
+    if (!ret)
+      break;
+
+    fiber->frames[fiber->numFrames - 1].ip = callerClosure->fn->code.data;
+    if (runInterpreter(vm, fiber) != WREN_RESULT_SUCCESS)
+    {
+      ret = false;
+      break;
+    }
+
+    //TODO: parse return value of method call, save it to chain db.
+
+  } while (false);
+  
+  if (abi)
+    free(abi);
+
+  if (callInfo)
+    wrenFreeCallInfo(callInfo);
 
   return ret;
 }

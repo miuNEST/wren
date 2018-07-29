@@ -7,6 +7,7 @@
 extern "C" {
     #include "wren.h"
     #include "wren_vm.h"
+    #include "wren_loader.h"
 }
 
 #endif

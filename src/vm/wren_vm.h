@@ -214,6 +214,6 @@ ObjModule* getModule(WrenVM* vm, Value name);
 Value wrenImportModule(WrenVM* vm, Value name);
 WrenInterpretResult runInterpreter(WrenVM* vm, register ObjFiber* fiber);
 void FIPS202_SHA3_256(const unsigned char *input, unsigned int inputByteLen, unsigned char *output);
-uint64_t wrenGetMethodID(const char *signature, size_t length);
+uint32_t wrenGetMethodId(const char *signature, size_t length);
 
 #endif

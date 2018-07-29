@@ -237,6 +237,18 @@ typedef struct
   bool isBuiltIn;
 } ObjModule;
 
+typedef struct MethodAbiInfo
+{
+  bool       isMethod;
+  bool       isStatic;
+  bool       isConstructor;
+  bool       isForeign;
+  char       signature[MAX_METHOD_SIGNATURE];
+  uint32_t   id;
+  uint8_t    methodArity;
+  char       className[64];
+} MethodAbiInfo;
+
 // A function object. It wraps and owns the bytecode and other debug information
 // for a callable chunk of code.
 //
@@ -267,13 +279,7 @@ typedef struct
   int arity;
   FnDebug* debug;
 
-  bool       isMethod;
-  bool       isStatic;
-  bool       isConstructor;
-  bool       isForeign;  
-  ObjString *signature;
-  uint32_t   id;
-  uint8_t    methodArity;
+  MethodAbiInfo abi;
 } ObjFn;
 
 // An instance of a first-class function and the environment it has closed over.

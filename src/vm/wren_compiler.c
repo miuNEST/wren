@@ -3209,13 +3209,20 @@ static bool method(Compiler* compiler, Variable classVariable)
     ObjFn *fn = endCompiler(&methodCompiler, fullSignature, length);
     if (fn && fn->module && !fn->module->isBuiltIn && signature.type != SIG_INITIALIZER)
     {
-      fn->isMethod       = true;
-      fn->isConstructor  = false;
-      fn->isForeign      = false;
-      fn->isStatic       = isStatic;
-      fn->signature      = wrenNewStringLength(compiler->parser->vm, fullSignature, length);
-      fn->id             = wrenGetMethodID(fullSignature, length);
-      fn->methodArity    = signature.arity;
+      MethodAbiInfo *abi = &fn->abi;
+      abi->isMethod       = true;
+      abi->isConstructor  = false;
+      abi->isForeign      = false;
+      abi->isStatic       = isStatic;      
+      abi->id             = wrenGetMethodId(fullSignature, length);
+      abi->methodArity    = signature.arity;
+
+      memset(abi->signature, 0, sizeof(abi->signature));
+      memcpy(abi->signature, fullSignature, min(length, sizeof(abi->signature) - 1));
+
+      ObjString *className = compiler->enclosingClass->name;
+      memset(abi->className, 0, sizeof(abi->className));
+      memcpy(abi->className, className->value, min(className->length, sizeof(abi->className) - 1));
     }
   }
   
@@ -3235,13 +3242,20 @@ static bool method(Compiler* compiler, Variable classVariable)
       //TODO: add ref of sigString to avoid GC.
       ObjString *sigString = compiler->parser->vm->methodNames.data[constructorSymbol];
 
-      fn->isMethod       = true;
-      fn->isConstructor  = true;
-      fn->isForeign      = isForeign;
-      fn->isStatic       = isStatic;
-      fn->signature      = wrenNewStringLength(compiler->parser->vm, sigString->value, sigString->length);
-      fn->id             = wrenGetMethodID(sigString->value, sigString->length);
-      fn->methodArity    = signature.arity;
+      MethodAbiInfo *abi = &fn->abi;
+      abi->isMethod       = true;
+      abi->isConstructor  = true;
+      abi->isForeign      = isForeign;
+      abi->isStatic       = isStatic;
+      abi->id             = wrenGetMethodId(sigString->value, sigString->length);
+      abi->methodArity    = signature.arity;
+
+      memset(abi->signature, 0, sizeof(abi->signature));
+      memcpy(abi->signature, sigString->value, min(sigString->length, sizeof(abi->signature) - 1));
+
+      ObjString *className = compiler->enclosingClass->name;
+      memset(abi->className, 0, sizeof(abi->className));
+      memcpy(abi->className, className->value, min(className->length, sizeof(abi->className) - 1));
     }
 
     defineMethod(compiler, classVariable, true, constructorSymbol);
@@ -3636,9 +3650,9 @@ void wrenMarkCompiler(WrenVM* vm, Compiler* compiler)
   while (compiler != NULL);
 }
 
-uint64_t wrenGetMethodID(const char *signature, size_t length)
+uint32_t wrenGetMethodId(const char *signature, size_t length)
 {
   unsigned char hash[32];
   FIPS202_SHA3_256((const unsigned char *)signature, (unsigned int)length, hash);
-  return *((uint64_t *)hash);
+  return *((uint32_t *)hash);
 }

@@ -1175,7 +1175,7 @@ void wrenInitializeCore(WrenVM* vm)
 
   // The rest of the classes can now be defined normally.
   UserData *userData = (UserData *)vm->config.userData;
-  if (userData->vmMode == VM_MODE_BYTECODE)
+  if (userData->vmMode == VM_MODE_BYTECODE && !wrenIsBuiltInModule(NULL))
   {
     if (!wrenLoadCompiledModule(vm, CORE_MODULE_NAME, true, NULL))
     {
