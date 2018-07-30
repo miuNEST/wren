@@ -9,6 +9,11 @@ using namespace graphene::chain;
 
 extern char * rootDirectory;
 
+void wrenVmDeleter(WrenVM *vm)
+{
+    wrenFreeVM(vm);
+}
+
 void reportError(WrenVM* vm, WrenErrorType type,
                         const char* module, int line, const char* message)
 {
@@ -137,10 +142,12 @@ string smart_contract_deploy_evaluator::construct_smart_contract(const string &b
     config.loadModuleFn        = readModule;
     config.userData            = &userData;
 
-    WrenVM *vm = wrenNewVM(&config);
+    string newStatestring;
 
     if (userData.vmMode == VM_MODE_BYTECODE)
     {
+        std::unique_ptr<WrenVM, decltype(&wrenVmDeleter)> vm(wrenNewVM(&config), &wrenVmDeleter);
+
         //TODO: optimize, no need to do base64 decode every time.
         string decoded = fc::base64_decode(bytecode);
         vector<uint8_t> decodedBytecode(decoded.begin(), decoded.end());
@@ -148,27 +155,27 @@ string smart_contract_deploy_evaluator::construct_smart_contract(const string &b
         //call constructor through ABI-based function call, and get ret value of construction.
         vector<uint8_t> oldState;
         vector<uint8_t> newState;
-        bool ret = wrenCallMethod(vm, decodedBytecode, true,
+        bool ret = wrenCallMethod(vm.get(), decodedBytecode, true,
                                     construct_data, abi_json, contract_addr,
                                     oldState, newState);
         FC_ASSERT(ret, "failed to construct smart contract");
+
+        if (!newState.empty())
+            newStatestring = fc::base64_encode(&newState[0], newState.size());
     }
     else
     {
         FC_ASSERT(false, "bad vm mode");
     }
 
-    wrenFreeVM(vm);
-
-    //TODO: get ret value of function call.
-    return "";
+    return newStatestring;
 }
 
-string smart_contract_call_evaluator::invoke_smart_contract(const string &bytecode,
-                                                            const contract_addr_type &contract_addr,
-                                                            const string &call_data,
-                                                            const string &abi_json,
-                                                            const string &starting_state)
+string smart_contract_call_evaluator::call_smart_contract(const string &bytecode,
+                                                          const contract_addr_type &contract_addr,
+                                                          const string &call_data,
+                                                          const string &abi_json,
+                                                          const string &starting_state)
 {
     UserData userData;
     userData.size   = sizeof(userData);
@@ -184,10 +191,12 @@ string smart_contract_call_evaluator::invoke_smart_contract(const string &byteco
     config.loadModuleFn        = readModule;
     config.userData            = &userData;
 
-    WrenVM *vm = wrenNewVM(&config);
+    string newStatestring;
 
     if (userData.vmMode == VM_MODE_BYTECODE)
-    {        
+    {
+        std::unique_ptr<WrenVM, decltype(&wrenVmDeleter)> vm(wrenNewVM(&config), &wrenVmDeleter);
+
         //TODO: optimize, no need to do base64 decode every time.
         string decoded1 = fc::base64_decode(bytecode);
         vector<uint8_t> decodedBytecode(decoded1.begin(), decoded1.end());
@@ -196,18 +205,18 @@ string smart_contract_call_evaluator::invoke_smart_contract(const string &byteco
         vector<uint8_t> decodedState(decoded2.begin(), decoded2.end());
 
         vector<uint8_t> newState;
-        bool ret = wrenCallMethod(vm, decodedBytecode, false,
+        bool ret = wrenCallMethod(vm.get(), decodedBytecode, false,
                                     call_data, abi_json, contract_addr,
                                     decodedState, newState);
         FC_ASSERT(ret, "failed to call smart contract");
+
+        if (!newState.empty())
+            newStatestring = fc::base64_encode(&newState[0], newState.size());
     }
     else
     {
         FC_ASSERT(false, "bad vm mode");
     }
 
-    wrenFreeVM(vm);
-
-    //TODO: get ret value of function call.
-    return "";
+    return newStatestring;
 }

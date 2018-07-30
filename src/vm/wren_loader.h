@@ -32,31 +32,12 @@ bool wrenGenerateABI(WrenVM *vm, ObjModule *module);
 
 #ifdef __cplusplus
 
-bool wrenLoadCompiledModule2(WrenVM      *vm,
-                             const char  *moduleName,
-                             bool         runClosure,
-                             ObjClosure **objClosure);
-
 bool wrenLoadCompiledModuleFromBuffer(WrenVM        *vm,
                                       const char    *moduleName,
                                       const uint8_t *bytecode,
                                       const uint32_t bytecodeLen,
                                       bool           runClosure,
                                       ObjClosure   **objClosure);
-
-
-bool wrenCallMethod2(WrenVM        *vm,
-                    const uint8_t *bytecode,
-                    const uint32_t bytecodeLen,
-                    bool           doConstruct,
-                    const char    *callData,
-                    const char    *abiJson,
-                    const char    *contractHash,
-                    const char    *oldState,
-                    uint32_t       oldStateLen,
-                    char         **newState,
-                    uint32_t      *newStateLen
-                    );
 
 bool wrenCallMethod(WrenVM               *vm,
                     const vector<uint8_t> &decodedBytecode,
