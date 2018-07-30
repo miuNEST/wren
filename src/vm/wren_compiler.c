@@ -11,6 +11,10 @@
   #include "wren_debug.h"
 #endif
 
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 // This is written in bottom-up order, so the tokenization comes first, then
 // parsing/code generation. This minimizes the number of explicit forward
 // declarations needed.
@@ -3218,11 +3222,11 @@ static bool method(Compiler* compiler, Variable classVariable)
       abi->methodArity    = signature.arity;
 
       memset(abi->signature, 0, sizeof(abi->signature));
-      memcpy(abi->signature, fullSignature, min(length, sizeof(abi->signature) - 1));
+      memcpy(abi->signature, fullSignature, MIN(length, sizeof(abi->signature) - 1));
 
       ObjString *className = compiler->enclosingClass->name;
       memset(abi->className, 0, sizeof(abi->className));
-      memcpy(abi->className, className->value, min(className->length, sizeof(abi->className) - 1));
+      memcpy(abi->className, className->value, MIN(className->length, sizeof(abi->className) - 1));
     }
   }
   
@@ -3251,11 +3255,11 @@ static bool method(Compiler* compiler, Variable classVariable)
       abi->methodArity    = signature.arity;
 
       memset(abi->signature, 0, sizeof(abi->signature));
-      memcpy(abi->signature, sigString->value, min(sigString->length, sizeof(abi->signature) - 1));
+      memcpy(abi->signature, sigString->value, MIN(sigString->length, sizeof(abi->signature) - 1));
 
       ObjString *className = compiler->enclosingClass->name;
       memset(abi->className, 0, sizeof(abi->className));
-      memcpy(abi->className, className->value, min(className->length, sizeof(abi->className) - 1));
+      memcpy(abi->className, className->value, MIN(className->length, sizeof(abi->className) - 1));
     }
 
     defineMethod(compiler, classVariable, true, constructorSymbol);
