@@ -24,7 +24,7 @@ void reportError(WrenVM* vm, WrenErrorType type,
         break;
       
     case WREN_ERROR_STACK_TRACE:
-        ilog("vm stack trace: module ${m}, line ${l}, msg ${s}",
+        elog("vm stack trace: module ${m}, line ${l}, msg ${s}",
             ("m", module)("l", line)("s", message));
         break;
     }
@@ -118,6 +118,52 @@ static char* readModule(WrenVM* vm, const char* module)
   return moduleContents;
 }
 
+string smart_contract_deploy_evaluator::construct_smart_contract(const string &bytecode,
+                                                                 const contract_addr_type &contract_addr,
+                                                                 const string &construct_data,
+                                                                 const string &abi_json)
+{
+    UserData userData;
+    userData.size   = sizeof(userData);
+    userData.vmMode = VM_MODE_BYTECODE;
+    userData.db     = &db();
+
+    WrenConfiguration config;
+    wrenInitConfiguration(&config);
+    config.bindForeignMethodFn = NULL;
+    config.writeFn             = write;
+    config.errorFn             = reportError;
+    config.initialHeapSize     = 1024 * 1024 * 10;
+    config.loadModuleFn        = readModule;
+    config.userData            = &userData;
+
+    WrenVM *vm = wrenNewVM(&config);
+
+    if (userData.vmMode == VM_MODE_BYTECODE)
+    {
+        //TODO: optimize, no need to do base64 decode every time.
+        string decoded = fc::base64_decode(bytecode);
+        vector<uint8_t> decodedBytecode(decoded.begin(), decoded.end());
+
+        //call constructor through ABI-based function call, and get ret value of construction.
+        vector<uint8_t> oldState;
+        vector<uint8_t> newState;
+        bool ret = wrenCallMethod(vm, decodedBytecode, true,
+                                    construct_data, abi_json, contract_addr,
+                                    oldState, newState);
+        FC_ASSERT(ret, "failed to construct smart contract");
+    }
+    else
+    {
+        FC_ASSERT(false, "bad vm mode");
+    }
+
+    wrenFreeVM(vm);
+
+    //TODO: get ret value of function call.
+    return "";
+}
+
 string smart_contract_call_evaluator::invoke_smart_contract(const string &bytecode,
                                                             const contract_addr_type &contract_addr,
                                                             const string &call_data,
@@ -143,11 +189,17 @@ string smart_contract_call_evaluator::invoke_smart_contract(const string &byteco
     if (userData.vmMode == VM_MODE_BYTECODE)
     {        
         //TODO: optimize, no need to do base64 decode every time.
-        std::string decoded = fc::base64_decode(bytecode);
+        string decoded1 = fc::base64_decode(bytecode);
+        vector<uint8_t> decodedBytecode(decoded1.begin(), decoded1.end());
 
-        //run byte code through ABI-based function call, and get ret value of function call.
-        FC_ASSERT(wrenCallMethod(vm, (const uint8_t *)decoded.c_str(), decoded.size(),
-                  call_data.c_str(), abi_json.c_str(), contract_addr.c_str()), "failed to call smart contract");
+        string decoded2 = fc::base64_decode(starting_state);
+        vector<uint8_t> decodedState(decoded2.begin(), decoded2.end());
+
+        vector<uint8_t> newState;
+        bool ret = wrenCallMethod(vm, decodedBytecode, false,
+                                    call_data, abi_json, contract_addr,
+                                    decodedState, newState);
+        FC_ASSERT(ret, "failed to call smart contract");
     }
     else
     {
