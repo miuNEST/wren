@@ -48,7 +48,8 @@ bool wrenCallMethod(WrenVM               *vm,
                     const vector<uint8_t> &decodedOldState,
                     vector<uint8_t>       &newState);
 
-#if __cplusplus < 201402L
+//https://blogs.msdn.microsoft.com/vcblog/2018/04/09/msvc-now-correctly-reports-__cplusplus/
+#if __cplusplus < 201402L && !defined(_MSC_VER)
 
 //http://www.open-std.org/JTC1/sc22/WG21/docs/papers/2013/n3656.htm
 //https ://docs.microsoft.com/en-us/cpp/standard-library/memory-functions#make_unique
